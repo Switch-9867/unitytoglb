@@ -1,0 +1,36 @@
+{
+  "name": "scene-to-gltf",
+  "version": "0.1.0",
+  "description": "Convert AssetRipper Unity scene export into glTF 2.0 / GLB",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "scene-to-gltf": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:memory": "vitest run test/convert/memory_benchmark.test.ts",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "unity",
+    "gltf",
+    "glb",
+    "assetripper",
+    "3d",
+    "converter"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@gltf-transform/core": "^4.1.0",
+    "@gltf-transform/extensions": "^4.1.0",
+    "@gltf-transform/functions": "^4.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

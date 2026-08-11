@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build Output
+dist/
+
+# Exported 3D Assets & Caches
+*.glb
+*.gltf
+*.bin
+AssetRipper_export_*
+.guid_cache.json
+
+# Environment & Logs
+*.log
+.DS_Store

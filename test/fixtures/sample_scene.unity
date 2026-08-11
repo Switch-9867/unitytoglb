@@ -1,0 +1,91 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!29 &1
+OcclusionCullingSettings:
+  m_OcclusionCullingData: {fileID: 0}
+--- !u!104 &2
+RenderSettings:
+  m_Fog: 1
+  m_FogColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+  m_FogDensity: 0.01
+  m_AmbientSkyColor: {r: 0.2, g: 0.2, b: 0.2, a: 1}
+--- !u!157 &3
+LightmapSettings:
+  m_GIWorkflowMode: 1
+  m_LightingDataAsset: {fileID: 0}
+--- !u!1 &100
+GameObject:
+  m_Name: RootObject
+  m_Layer: 0
+  m_TagString: Untagged
+  m_IsActive: 1
+  m_Component:
+  - component: {fileID: 101}
+--- !u!4 &101
+Transform:
+  m_GameObject: {fileID: 100}
+  m_LocalPosition: {x: 1, y: 2, z: 3}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children:
+  - {fileID: 201}
+  - {fileID: 301}
+  m_Father: {fileID: 0}
+  m_RootOrder: 0
+--- !u!1 &200
+GameObject:
+  m_Name: ChildMesh
+  m_Layer: 0
+  m_TagString: Untagged
+  m_IsActive: 1
+  m_Component:
+  - component: {fileID: 201}
+  - component: {fileID: 202}
+  - component: {fileID: 203}
+--- !u!4 &201
+Transform:
+  m_GameObject: {fileID: 200}
+  m_LocalPosition: {x: 0, y: 5, z: 0}
+  m_LocalRotation: {x: 0, y: 0.7071068, z: 0, w: 0.7071068}
+  m_LocalScale: {x: 2, y: 2, z: 2}
+  m_Children: []
+  m_Father: {fileID: 101}
+  m_RootOrder: 0
+--- !u!33 &202
+MeshFilter:
+  m_GameObject: {fileID: 200}
+  m_Mesh: {fileID: 4300000, guid: testmeshguid123456789012345678, type: 2}
+--- !u!23 &203
+MeshRenderer:
+  m_GameObject: {fileID: 200}
+  m_Materials:
+  - {fileID: 2100000, guid: testmatguid1234567890123456789, type: 2}
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_LightmapIndex: -1
+--- !u!1 &300
+GameObject:
+  m_Name: Main Camera
+  m_Layer: 0
+  m_TagString: MainCamera
+  m_IsActive: 1
+  m_Component:
+  - component: {fileID: 301}
+  - component: {fileID: 302}
+--- !u!4 &301
+Transform:
+  m_GameObject: {fileID: 300}
+  m_LocalPosition: {x: 0, y: 1, z: -10}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 101}
+  m_RootOrder: 1
+--- !u!20 &302
+Camera:
+  m_GameObject: {fileID: 300}
+  field of view: 60
+  near clip plane: 0.3
+  far clip plane: 1000
+  m_BackGroundColor: {r: 0.1, g: 0.1, b: 0.1, a: 1}
+  m_ClearFlags: 1
