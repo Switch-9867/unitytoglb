@@ -77,12 +77,10 @@ export function createGltfSceneGraph(
   }
 
   // 5. Add root nodes to glTF Scene in rootOrder
-  // If rotateYUp is enabled, wrap top-level root nodes in a master SceneRoot with +180 deg X rotation (to account for Y-reflection + 90 deg tilt)
   let parentContainer: Scene | Node = scene;
   if (options?.rotateYUp) {
     const masterRoot = doc.createNode('SceneRoot');
-    // 180 deg X rotation (x = 1, y = 0, z = 0, w = 0)
-    masterRoot.setRotation([1.0, 0.0, 0.0, 0.0]);
+    // Optional master root container
     scene.addChild(masterRoot);
     parentContainer = masterRoot;
   }
