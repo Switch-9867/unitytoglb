@@ -10,38 +10,59 @@ import {
   convertUVsArray,
   reverseTriangleWinding,
 } from './coords.js';
+import { Matrix4, transformPoint3D, transformVector3D } from './matrix.js';
 
 export interface MeshSubmeshRange {
   firstSubMesh?: number;
   subMeshCount?: number;
 }
 
-export function createGltfMesh(
+export interface SharedVertexAccessors {
+  posAccessor: Accessor | null;
+  normAccessor: Accessor | null;
+  tanAccessor: Accessor | null;
+  uv0Accessor: Accessor | null;
+}
+
+export function createSharedVertexAccessors(
   doc: Document,
   buffer: Buffer,
   sourceMesh: SourceMesh,
-  materials?: (Material | null)[],
-  submeshRange?: MeshSubmeshRange
-): Mesh {
+  positionTransform?: Matrix4 | null
+): SharedVertexAccessors {
   const meshName = String(sourceMesh.name || 'Mesh');
-  const mesh = doc.createMesh(meshName);
 
-  // Shared vertex attribute accessors for the entire mesh across all submeshes
   let posAccessor: Accessor | null = null;
   let normAccessor: Accessor | null = null;
   let tanAccessor: Accessor | null = null;
   let uv0Accessor: Accessor | null = null;
 
-  // 1. POSITION (semantic 0) - Master vertex count for the mesh
+  // 1. POSITION (semantic 0)
   const rawPositions = extractChannelFloat32(sourceMesh.vertexData, 0);
   if (!rawPositions || rawPositions.length < 3) {
-    return mesh; // Mesh has no valid position data
+    return { posAccessor: null, normAccessor: null, tanAccessor: null, uv0Accessor: null };
   }
 
-  const convertedPositions = convertPositionsArray(rawPositions);
+  // Transform raw position points by globalInverseTransform for static batched meshes
+  let positionsToConvert = rawPositions;
+  if (positionTransform) {
+    positionsToConvert = new Float32Array(rawPositions.length);
+    for (let i = 0; i < rawPositions.length; i += 3) {
+      const pt = transformPoint3D(positionTransform, {
+        x: rawPositions[i],
+        y: rawPositions[i + 1],
+        z: rawPositions[i + 2],
+      });
+      positionsToConvert[i] = pt.x;
+      positionsToConvert[i + 1] = pt.y;
+      positionsToConvert[i + 2] = pt.z;
+    }
+  }
+
+  const convertedPositions = convertPositionsArray(positionsToConvert);
   const vertexCount = Math.floor(convertedPositions.length / 3);
   if (vertexCount === 0) {
-    return mesh;
+    return { posAccessor: null, normAccessor: null, tanAccessor: null, uv0Accessor: null };
   }
 
   posAccessor = doc
@@ -51,10 +72,26 @@ export function createGltfMesh(
     .setArray(convertedPositions)
     .setBuffer(buffer);
 
-  // 2. NORMAL (semantic 1) - Must match master vertexCount per glTF 2.0 spec
+  // 2. NORMAL (semantic 1)
   const rawNormals = extractChannelFloat32(sourceMesh.vertexData, 1);
   if (rawNormals && rawNormals.length >= 3) {
-    let convertedNormals = convertNormalsArray(rawNormals);
+    let normalsToConvert = rawNormals;
+    if (positionTransform) {
+      normalsToConvert = new Float32Array(rawNormals.length);
+      for (let i = 0; i < rawNormals.length; i += 3) {
+        const vec = transformVector3D(positionTransform, {
+          x: rawNormals[i],
+          y: rawNormals[i + 1],
+          z: rawNormals[i + 2],
+        });
+        const len = Math.hypot(vec.x, vec.y, vec.z) || 1.0;
+        normalsToConvert[i] = vec.x / len;
+        normalsToConvert[i + 1] = vec.y / len;
+        normalsToConvert[i + 2] = vec.z / len;
+      }
+    }
+
+    let convertedNormals = convertNormalsArray(normalsToConvert);
     const targetLength = vertexCount * 3;
     if (convertedNormals.length !== targetLength) {
       const fixedNorms = new Float32Array(targetLength);
@@ -69,7 +106,7 @@ export function createGltfMesh(
       .setBuffer(buffer);
   }
 
-  // 3. TANGENT (semantic 2) - Must match master vertexCount per glTF 2.0 spec
+  // 3. TANGENT (semantic 2)
   const rawTangents = extractChannelFloat32(sourceMesh.vertexData, 2);
   if (rawTangents && rawTangents.length >= 4) {
     let convertedTangents = convertTangentsArray(rawTangents);
@@ -87,7 +124,7 @@ export function createGltfMesh(
       .setBuffer(buffer);
   }
 
-  // 4. TEXCOORD_0 (semantic 4) - Must match master vertexCount per glTF 2.0 spec
+  // 4. TEXCOORD_0 (semantic 4)
   const rawUV0 = extractChannelFloat32(sourceMesh.vertexData, 4);
   if (rawUV0 && rawUV0.length >= 2) {
     let convertedUV0 = convertUVsArray(rawUV0);
@@ -104,6 +141,27 @@ export function createGltfMesh(
       .setArray(convertedUV0)
       .setBuffer(buffer);
   }
+
+  return { posAccessor, normAccessor, tanAccessor, uv0Accessor };
+}
+
+export function createGltfMesh(
+  doc: Document,
+  buffer: Buffer,
+  sourceMesh: SourceMesh,
+  materials?: (Material | null)[],
+  submeshRange?: MeshSubmeshRange,
+  existingAccessors?: SharedVertexAccessors
+): Mesh {
+  const meshName = String(sourceMesh.name || 'Mesh');
+  const mesh = doc.createMesh(meshName);
+
+  const accessors = existingAccessors || createSharedVertexAccessors(doc, buffer, sourceMesh);
+  if (!accessors.posAccessor) {
+    return mesh;
+  }
+
+  const { posAccessor, normAccessor, tanAccessor, uv0Accessor } = accessors;
 
   // Determine submesh range (support Unity static batching submesh slicing)
   const startSub = submeshRange?.firstSubMesh ?? 0;

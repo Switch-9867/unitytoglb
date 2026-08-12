@@ -10,24 +10,24 @@ import {
   computeMinMax3D,
 } from '../../src/convert/coords.js';
 
-describe('Coordinate Conversion Math', () => {
-  it('converts position by negating Z axis', () => {
-    expect(convertPosition({ x: 1, y: 2, z: 3 })).toEqual({ x: 1, y: 2, z: -3 });
-    expect(convertPosition({ x: 0, y: 0, z: -5 })).toEqual({ x: 0, y: 0, z: 5 });
+describe('Coordinate Conversion Math (AssetRipper X-Flip)', () => {
+  it('converts position by negating X axis', () => {
+    expect(convertPosition({ x: 1, y: 2, z: 3 })).toEqual({ x: -1, y: 2, z: 3 });
+    expect(convertPosition({ x: -5, y: 0, z: 0 })).toEqual({ x: 5, y: 0, z: 0 });
   });
 
-  it('converts vector by negating Z axis', () => {
-    expect(convertVector({ x: 0, y: 1, z: 0 })).toEqual({ x: 0, y: 1, z: -0 });
-    expect(convertVector({ x: 0, y: 0, z: 1 })).toEqual({ x: 0, y: 0, z: -1 });
+  it('converts vector by negating X axis', () => {
+    expect(convertVector({ x: 1, y: 0, z: 0 })).toEqual({ x: -1, y: 0, z: 0 });
+    expect(convertVector({ x: 0, y: 1, z: 0 })).toEqual({ x: -0, y: 1, z: 0 });
   });
 
-  it('converts tangent by negating Z and inverting w', () => {
-    expect(convertTangent({ x: 1, y: 0, z: 0, w: 1 })).toEqual({ x: 1, y: 0, z: -0, w: -1 });
-    expect(convertTangent({ x: 0, y: 1, z: -0.5, w: -1 })).toEqual({ x: 0, y: 1, z: 0.5, w: 1 });
+  it('converts tangent by negating X and inverting w', () => {
+    expect(convertTangent({ x: 1, y: 0, z: 0, w: 1 })).toEqual({ x: -1, y: 0, z: 0, w: -1 });
+    expect(convertTangent({ x: -0.5, y: 1, z: 0.5, w: -1 })).toEqual({ x: 0.5, y: 1, z: 0.5, w: 1 });
   });
 
-  it('converts rotation quaternion under Z reflection', () => {
-    expect(convertRotation({ x: 0.1, y: 0.2, z: 0.3, w: 0.9 })).toEqual({ x: -0.1, y: -0.2, z: 0.3, w: 0.9 });
+  it('converts rotation quaternion matching AssetRipper formula', () => {
+    expect(convertRotation({ x: 0.1, y: 0.2, z: 0.3, w: 0.9 })).toEqual({ x: 0.1, y: -0.2, z: -0.3, w: 0.9 });
   });
 
   it('preserves scale unchanged', () => {

@@ -1,39 +1,39 @@
 // Pure coordinate, unit, rotation, winding, and convention transformations
-// See COORDINATE_SYSTEM.md for mathematical specifications and derivations.
+// Reimplemented from AssetRipper GlbCoordinateConversion.cs
 
 import { Vec3, Quat, Vec4 } from '../model/types.js';
 
 /**
- * Position conversion: flip Z axis (reflection across XY plane).
- * Unity (left-handed, +Z forward) -> glTF (right-handed, -Z forward).
- * p' = (p.x, p.y, -p.z)
+ * Position conversion: flip X axis.
+ * Unity (left-handed, +X right) -> glTF (right-handed, -X right).
+ * p' = (-p.x, p.y, p.z)
  */
 export function convertPosition(p: Vec3): Vec3 {
-  return { x: p.x, y: p.y, z: -p.z };
+  return { x: -p.x, y: p.y, z: p.z };
 }
 
 /**
- * Normal / Direction vector conversion: flip Z axis.
- * n' = (n.x, n.y, -n.z)
+ * Normal / Direction vector conversion: flip X axis.
+ * n' = (-n.x, n.y, n.z)
  */
 export function convertVector(v: Vec3): Vec3 {
-  return { x: v.x, y: v.y, z: -v.z };
+  return { x: -v.x, y: v.y, z: v.z };
 }
 
 /**
- * Tangent conversion: flip Z axis and invert tangent handedness w.
- * t' = (t.x, t.y, -t.z, -t.w)
+ * Tangent conversion: flip X axis and invert tangent handedness w.
+ * t' = (-t.x, t.y, t.z, -t.w)
  */
 export function convertTangent(t: Vec4): Vec4 {
-  return { x: t.x, y: t.y, z: -t.z, w: -t.w };
+  return { x: -t.x, y: t.y, z: t.z, w: -t.w };
 }
 
 /**
- * Quaternion rotation conversion under Z-axis reflection (left-handed to right-handed).
- * q' = (-q.x, -q.y, q.z, q.w)
+ * Quaternion rotation conversion matching AssetRipper GlbCoordinateConversion.ToGltfQuaternionConvert.
+ * q' = (q.x, -q.y, -q.z, q.w)
  */
 export function convertRotation(q: Quat): Quat {
-  return { x: -q.x, y: -q.y, z: q.z, w: q.w };
+  return { x: q.x, y: -q.y, z: -q.z, w: q.w };
 }
 
 /**
@@ -69,34 +69,34 @@ export function reverseTriangleWinding<T extends Uint16Array | Uint32Array>(indi
 }
 
 /**
- * Apply coordinate flip to a contiguous Float32Array of positions (3 floats per vertex).
+ * Apply X-axis coordinate flip to a contiguous Float32Array of positions (3 floats per vertex).
  */
 export function convertPositionsArray(positions: Float32Array): Float32Array {
   const result = new Float32Array(positions.length);
   for (let i = 0; i < positions.length; i += 3) {
-    result[i] = positions[i];
+    result[i] = -positions[i];
     result[i + 1] = positions[i + 1];
-    result[i + 2] = -positions[i + 2];
+    result[i + 2] = positions[i + 2];
   }
   return result;
 }
 
 /**
- * Apply coordinate flip to a contiguous Float32Array of normals (3 floats per vertex).
+ * Apply X-axis coordinate flip to a contiguous Float32Array of normals (3 floats per vertex).
  */
 export function convertNormalsArray(normals: Float32Array): Float32Array {
   return convertPositionsArray(normals);
 }
 
 /**
- * Apply coordinate & handedness flip to a contiguous Float32Array of tangents (4 floats per vertex).
+ * Apply X-axis & handedness flip to a contiguous Float32Array of tangents (4 floats per vertex).
  */
 export function convertTangentsArray(tangents: Float32Array): Float32Array {
   const result = new Float32Array(tangents.length);
   for (let i = 0; i < tangents.length; i += 4) {
-    result[i] = tangents[i];
+    result[i] = -tangents[i];
     result[i + 1] = tangents[i + 1];
-    result[i + 2] = -tangents[i + 2];
+    result[i + 2] = tangents[i + 2];
     result[i + 3] = -tangents[i + 3];
   }
   return result;

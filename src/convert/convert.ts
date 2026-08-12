@@ -1,4 +1,5 @@
 // Orchestrate conversion from SourceScene + Assets to glTF Document / GLB / GLTF
+// Reimplemented with AssetRipper GlbLevelBuilder scene transform hierarchy & static batching inverse-transforms
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -7,10 +8,11 @@ import { KHRTextureTransform, KHRLightsPunctual } from '@gltf-transform/extensio
 import { prune, dedup } from '@gltf-transform/functions';
 import { SourceScene, SourceMesh, SourceMaterial } from '../model/types.js';
 import { createGltfSceneGraph } from './hierarchy.js';
-import { createGltfMesh } from './geometry.js';
+import { createGltfMesh, createSharedVertexAccessors, SharedVertexAccessors } from './geometry.js';
 import { createGltfMaterial } from './materials.js';
 import { createTextureManager } from './textures.js';
 import { GuidIndex } from '../io/guidIndex.js';
+import { Matrix4, createIdentityMatrix, createTRSMatrix, multiplyMatrices, invertMatrix } from './matrix.js';
 
 export interface SourceBundle {
   scene: SourceScene;
@@ -42,7 +44,31 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     gltfMaterialMap.set(guid, gltfMat);
   }
 
-  // 2. Convert Meshes per Renderer with Per-Renderer Material Binding & Static Batch Submesh Slicing
+  // 2. Compute Global Transforms & Inverse Transforms for all Nodes (matching AssetRipper GlbLevelBuilder)
+  const nodeGlobalInverseTransformMap = new Map<number, Matrix4>();
+
+  function computeNodeTransforms(fileID: number, parentGlobal: Matrix4) {
+    const node = bundle.scene.nodes.get(fileID);
+    if (!node) return;
+
+    const localMat = createTRSMatrix(node.localPosition, node.localRotation, node.localScale);
+    const globalMat = multiplyMatrices(parentGlobal, localMat);
+    const invGlobalMat = invertMatrix(globalMat) || createIdentityMatrix();
+
+    nodeGlobalInverseTransformMap.set(fileID, invGlobalMat);
+
+    for (const childId of node.childFileIds) {
+      computeNodeTransforms(childId, globalMat);
+    }
+  }
+
+  const identityMat = createIdentityMatrix();
+  for (const rootFileId of bundle.scene.rootNodeFileIds) {
+    computeNodeTransforms(rootFileId, identityMat);
+  }
+
+  // 3. Convert Meshes per Renderer with Static Batching Inverse Transforms
+  const sharedAccessorsMap = new Map<string, SharedVertexAccessors>();
   const meshVariantMap = new Map<string, Mesh>();
   const nodeMeshMap = new Map<number, Mesh>();
 
@@ -52,6 +78,23 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     }
 
     const sourceMesh = bundle.meshes.get(renderer.meshGuid)!;
+    const isStaticBatch = !!(renderer.staticBatchInfo && renderer.staticBatchInfo.subMeshCount > 0);
+
+    // If static batched, compute inverse global transform for vertices
+    const posTransform = isStaticBatch ? nodeGlobalInverseTransformMap.get(renderer.nodeFileId) || null : null;
+
+    // Cache key includes meshGuid and posTransform hash for static meshes
+    const transformKey = isStaticBatch ? `_inv_${renderer.nodeFileId}` : '_dynamic';
+
+    let accessors = sharedAccessorsMap.get(`${renderer.meshGuid}${transformKey}`);
+    if (!accessors) {
+      accessors = createSharedVertexAccessors(doc, buffer, sourceMesh, posTransform);
+      sharedAccessorsMap.set(`${renderer.meshGuid}${transformKey}`, accessors);
+    }
+
+    if (!accessors.posAccessor) {
+      continue;
+    }
 
     // Build material list for submeshes of this renderer
     const matList: (Material | null)[] = [];
@@ -67,18 +110,18 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     const firstSub = renderer.staticBatchInfo?.firstSubMesh ?? 0;
     const subCount = renderer.staticBatchInfo?.subMeshCount ?? 0;
 
-    const variantKey = `${renderer.meshGuid}:sub_${firstSub}_${subCount}:${matGuidsKeyParts.join('_')}`;
+    const variantKey = `${renderer.meshGuid}:${transformKey}:sub_${firstSub}_${subCount}:${matGuidsKeyParts.join('_')}`;
 
     let gltfMesh = meshVariantMap.get(variantKey);
     if (!gltfMesh) {
-      gltfMesh = createGltfMesh(doc, buffer, sourceMesh, matList, renderer.staticBatchInfo);
+      gltfMesh = createGltfMesh(doc, buffer, sourceMesh, matList, renderer.staticBatchInfo, accessors);
       meshVariantMap.set(variantKey, gltfMesh);
     }
 
     nodeMeshMap.set(renderer.nodeFileId, gltfMesh);
   }
 
-  // 3. Convert Scene Hierarchy (including Cameras and Lights)
+  // 4. Convert Scene Hierarchy (including Cameras and Lights)
   createGltfSceneGraph(doc, bundle.scene, (nodeFileId) => nodeMeshMap.get(nodeFileId) || null);
 
   return doc;
