@@ -9,23 +9,26 @@ import { Vec3, Quat, Vec4 } from '../model/types.js';
  * p' = (-p.x, p.y, p.z)
  */
 export function convertPosition(p: Vec3): Vec3 {
-  return { x: -p.x, y: p.y, z: p.z };
+  return { x: -p.x || 0, y: p.y || 0, z: p.z || 0 };
 }
 
 /**
- * Normal / Direction vector conversion: flip X axis.
+ * Normal / Direction vector conversion: flip X axis & normalize.
  * n' = (-n.x, n.y, n.z)
  */
 export function convertVector(v: Vec3): Vec3 {
-  return { x: -v.x, y: v.y, z: v.z };
+  const len = Math.hypot(-v.x, v.y, v.z) || 1.0;
+  return { x: (-v.x / len) || 0, y: (v.y / len) || 0, z: (v.z / len) || 0 };
 }
 
 /**
- * Tangent conversion: flip X axis and invert tangent handedness w.
+ * Tangent conversion: flip X axis, normalize (x,y,z), and clamp handedness w to +/-1.
  * t' = (-t.x, t.y, t.z, -t.w)
  */
 export function convertTangent(t: Vec4): Vec4 {
-  return { x: -t.x, y: t.y, z: t.z, w: -t.w };
+  const len = Math.hypot(-t.x, t.y, t.z) || 1.0;
+  const w = t.w < 0 ? 1.0 : -1.0; // Inverted handedness for X-flip
+  return { x: (-t.x / len) || 0, y: (t.y / len) || 0, z: (t.z / len) || 0, w };
 }
 
 /**
@@ -33,7 +36,7 @@ export function convertTangent(t: Vec4): Vec4 {
  * q' = (q.x, -q.y, -q.z, q.w)
  */
 export function convertRotation(q: Quat): Quat {
-  return { x: q.x, y: -q.y, z: -q.z, w: q.w };
+  return { x: q.x || 0, y: -q.y || 0, z: -q.z || 0, w: q.w || 0 };
 }
 
 /**
@@ -49,7 +52,7 @@ export function convertScale(s: Vec3): Vec3 {
  * u' = u, v' = 1 - v
  */
 export function convertUV(u: number, v: number): { u: number; v: number } {
-  return { u, v: 1.0 - v };
+  return { u: u || 0, v: (1.0 - v) || 0 };
 }
 
 /**
@@ -74,30 +77,64 @@ export function reverseTriangleWinding<T extends Uint16Array | Uint32Array>(indi
 export function convertPositionsArray(positions: Float32Array): Float32Array {
   const result = new Float32Array(positions.length);
   for (let i = 0; i < positions.length; i += 3) {
-    result[i] = -positions[i];
-    result[i + 1] = positions[i + 1];
-    result[i + 2] = positions[i + 2];
+    result[i] = -positions[i] || 0;
+    result[i + 1] = positions[i + 1] || 0;
+    result[i + 2] = positions[i + 2] || 0;
   }
   return result;
 }
 
 /**
- * Apply X-axis coordinate flip to a contiguous Float32Array of normals (3 floats per vertex).
+ * Apply X-axis coordinate flip & strict unit normalization to a contiguous Float32Array of normals (3 floats per vertex).
  */
 export function convertNormalsArray(normals: Float32Array): Float32Array {
-  return convertPositionsArray(normals);
+  const result = new Float32Array(normals.length);
+  for (let i = 0; i < normals.length; i += 3) {
+    const x = -normals[i];
+    const y = normals[i + 1];
+    const z = normals[i + 2];
+
+    const len = Math.hypot(x, y, z);
+    if (len > 1e-6) {
+      result[i] = (x / len) || 0;
+      result[i + 1] = (y / len) || 0;
+      result[i + 2] = (z / len) || 0;
+    } else {
+      // Fallback for zero or degenerate normal
+      result[i] = 0;
+      result[i + 1] = 1.0;
+      result[i + 2] = 0;
+    }
+  }
+  return result;
 }
 
 /**
- * Apply X-axis & handedness flip to a contiguous Float32Array of tangents (4 floats per vertex).
+ * Apply X-axis & handedness flip with unit normalization to a contiguous Float32Array of tangents (4 floats per vertex).
  */
 export function convertTangentsArray(tangents: Float32Array): Float32Array {
   const result = new Float32Array(tangents.length);
   for (let i = 0; i < tangents.length; i += 4) {
-    result[i] = -tangents[i];
-    result[i + 1] = tangents[i + 1];
-    result[i + 2] = tangents[i + 2];
-    result[i + 3] = -tangents[i + 3];
+    const x = -tangents[i];
+    const y = tangents[i + 1];
+    const z = tangents[i + 2];
+    const rawW = tangents[i + 3];
+
+    // Invert sign of w for X-flip handedness, strictly clamped to +/-1.0
+    const w = rawW < 0 ? 1.0 : -1.0;
+
+    const len = Math.hypot(x, y, z);
+    if (len > 1e-6) {
+      result[i] = (x / len) || 0;
+      result[i + 1] = (y / len) || 0;
+      result[i + 2] = (z / len) || 0;
+      result[i + 3] = w;
+    } else {
+      result[i] = 1.0;
+      result[i + 1] = 0;
+      result[i + 2] = 0;
+      result[i + 3] = w;
+    }
   }
   return result;
 }
@@ -108,8 +145,8 @@ export function convertTangentsArray(tangents: Float32Array): Float32Array {
 export function convertUVsArray(uvs: Float32Array): Float32Array {
   const result = new Float32Array(uvs.length);
   for (let i = 0; i < uvs.length; i += 2) {
-    result[i] = uvs[i];
-    result[i + 1] = 1.0 - uvs[i + 1];
+    result[i] = uvs[i] || 0;
+    result[i + 1] = (1.0 - uvs[i + 1]) || 0;
   }
   return result;
 }
