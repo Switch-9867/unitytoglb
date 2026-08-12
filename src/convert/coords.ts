@@ -1,42 +1,40 @@
 // Pure coordinate, unit, rotation, winding, and convention transformations
-// Reimplemented from AssetRipper GlbCoordinateConversion.cs
+// Preserves exact local TRS coordinates from Unity scene graph
 
 import { Vec3, Quat, Vec4 } from '../model/types.js';
 
 /**
- * Position conversion: flip X axis.
- * Unity (left-handed, +X right) -> glTF (right-handed, -X right).
- * p' = (-p.x, p.y, p.z)
+ * Position conversion: Preserves exact local position coordinates.
+ * p' = (p.x, p.y, p.z)
  */
 export function convertPosition(p: Vec3): Vec3 {
-  return { x: -p.x || 0, y: p.y || 0, z: p.z || 0 };
+  return { x: p.x || 0, y: p.y || 0, z: p.z || 0 };
 }
 
 /**
- * Normal / Direction vector conversion: flip X axis & normalize.
- * n' = (-n.x, n.y, n.z)
+ * Normal / Direction vector conversion & normalize.
+ * n' = (n.x, n.y, n.z)
  */
 export function convertVector(v: Vec3): Vec3 {
-  const len = Math.hypot(-v.x, v.y, v.z) || 1.0;
-  return { x: (-v.x / len) || 0, y: (v.y / len) || 0, z: (v.z / len) || 0 };
+  const len = Math.hypot(v.x, v.y, v.z) || 1.0;
+  return { x: (v.x / len) || 0, y: (v.y / len) || 0, z: (v.z / len) || 0 };
 }
 
 /**
- * Tangent conversion: flip X axis, normalize (x,y,z), and clamp handedness w to +/-1.
- * t' = (-t.x, t.y, t.z, -t.w)
+ * Tangent conversion: normalize (x,y,z) and clamp handedness w to +/-1.
  */
 export function convertTangent(t: Vec4): Vec4 {
-  const len = Math.hypot(-t.x, t.y, t.z) || 1.0;
-  const w = t.w < 0 ? 1.0 : -1.0; // Inverted handedness for X-flip
-  return { x: (-t.x / len) || 0, y: (t.y / len) || 0, z: (t.z / len) || 0, w };
+  const len = Math.hypot(t.x, t.y, t.z) || 1.0;
+  const w = t.w < 0 ? -1.0 : 1.0;
+  return { x: (t.x / len) || 0, y: (t.y / len) || 0, z: (t.z / len) || 0, w };
 }
 
 /**
- * Quaternion rotation conversion matching AssetRipper GlbCoordinateConversion.ToGltfQuaternionConvert.
- * q' = (q.x, -q.y, -q.z, q.w)
+ * Quaternion rotation conversion matching exact Unity local rotation.
+ * q' = (q.x, q.y, q.z, q.w)
  */
 export function convertRotation(q: Quat): Quat {
-  return { x: q.x || 0, y: -q.y || 0, z: -q.z || 0, w: q.w || 0 };
+  return { x: q.x || 0, y: q.y || 0, z: q.z || 0, w: q.w || 0 };
 }
 
 /**
@@ -72,12 +70,12 @@ export function reverseTriangleWinding<T extends Uint16Array | Uint32Array>(indi
 }
 
 /**
- * Apply X-axis coordinate flip to a contiguous Float32Array of positions (3 floats per vertex).
+ * Apply coordinate passthrough to a contiguous Float32Array of positions (3 floats per vertex).
  */
 export function convertPositionsArray(positions: Float32Array): Float32Array {
   const result = new Float32Array(positions.length);
   for (let i = 0; i < positions.length; i += 3) {
-    result[i] = -positions[i] || 0;
+    result[i] = positions[i] || 0;
     result[i + 1] = positions[i + 1] || 0;
     result[i + 2] = positions[i + 2] || 0;
   }
@@ -85,12 +83,12 @@ export function convertPositionsArray(positions: Float32Array): Float32Array {
 }
 
 /**
- * Apply X-axis coordinate flip & strict unit normalization to a contiguous Float32Array of normals (3 floats per vertex).
+ * Apply strict unit normalization to a contiguous Float32Array of normals (3 floats per vertex).
  */
 export function convertNormalsArray(normals: Float32Array): Float32Array {
   const result = new Float32Array(normals.length);
   for (let i = 0; i < normals.length; i += 3) {
-    const x = -normals[i];
+    const x = normals[i];
     const y = normals[i + 1];
     const z = normals[i + 2];
 
@@ -110,18 +108,17 @@ export function convertNormalsArray(normals: Float32Array): Float32Array {
 }
 
 /**
- * Apply X-axis & handedness flip with unit normalization to a contiguous Float32Array of tangents (4 floats per vertex).
+ * Apply handedness clamp with unit normalization to a contiguous Float32Array of tangents (4 floats per vertex).
  */
 export function convertTangentsArray(tangents: Float32Array): Float32Array {
   const result = new Float32Array(tangents.length);
   for (let i = 0; i < tangents.length; i += 4) {
-    const x = -tangents[i];
+    const x = tangents[i];
     const y = tangents[i + 1];
     const z = tangents[i + 2];
     const rawW = tangents[i + 3];
 
-    // Invert sign of w for X-flip handedness, strictly clamped to +/-1.0
-    const w = rawW < 0 ? 1.0 : -1.0;
+    const w = rawW < 0 ? -1.0 : 1.0;
 
     const len = Math.hypot(x, y, z);
     if (len > 1e-6) {
