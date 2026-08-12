@@ -26,13 +26,18 @@ export function createGltfMesh(
   let tanAccessor: Accessor | null = null;
   let uv0Accessor: Accessor | null = null;
 
-  // 1. POSITION (semantic 0) - Raw un-modified vertex position array
+  // 1. POSITION (semantic 0) - Master vertex count for the mesh
   const rawPositions = extractChannelFloat32(sourceMesh.vertexData, 0);
-  if (!rawPositions || rawPositions.length === 0) {
+  if (!rawPositions || rawPositions.length < 3) {
     return mesh; // Mesh has no valid position data
   }
 
   const convertedPositions = convertPositionsArray(rawPositions);
+  const vertexCount = Math.floor(convertedPositions.length / 3);
+  if (vertexCount === 0) {
+    return mesh;
+  }
+
   posAccessor = doc
     .createAccessor()
     .setName(`${meshName}_pos`)
@@ -40,10 +45,16 @@ export function createGltfMesh(
     .setArray(convertedPositions)
     .setBuffer(buffer);
 
-  // 2. NORMAL (semantic 1) - Raw un-modified vertex normal array
+  // 2. NORMAL (semantic 1) - Must match master vertexCount per glTF 2.0 spec
   const rawNormals = extractChannelFloat32(sourceMesh.vertexData, 1);
-  if (rawNormals && rawNormals.length > 0) {
-    const convertedNormals = convertNormalsArray(rawNormals);
+  if (rawNormals && rawNormals.length >= 3) {
+    let convertedNormals = convertNormalsArray(rawNormals);
+    const targetLength = vertexCount * 3;
+    if (convertedNormals.length !== targetLength) {
+      const fixedNorms = new Float32Array(targetLength);
+      fixedNorms.set(convertedNormals.subarray(0, Math.min(convertedNormals.length, targetLength)));
+      convertedNormals = fixedNorms;
+    }
     normAccessor = doc
       .createAccessor()
       .setName(`${meshName}_norm`)
@@ -52,10 +63,16 @@ export function createGltfMesh(
       .setBuffer(buffer);
   }
 
-  // 3. TANGENT (semantic 2) - Raw un-modified vertex tangent array
+  // 3. TANGENT (semantic 2) - Must match master vertexCount per glTF 2.0 spec
   const rawTangents = extractChannelFloat32(sourceMesh.vertexData, 2);
-  if (rawTangents && rawTangents.length > 0) {
-    const convertedTangents = convertTangentsArray(rawTangents);
+  if (rawTangents && rawTangents.length >= 4) {
+    let convertedTangents = convertTangentsArray(rawTangents);
+    const targetLength = vertexCount * 4;
+    if (convertedTangents.length !== targetLength) {
+      const fixedTans = new Float32Array(targetLength);
+      fixedTans.set(convertedTangents.subarray(0, Math.min(convertedTangents.length, targetLength)));
+      convertedTangents = fixedTans;
+    }
     tanAccessor = doc
       .createAccessor()
       .setName(`${meshName}_tan`)
@@ -64,10 +81,16 @@ export function createGltfMesh(
       .setBuffer(buffer);
   }
 
-  // 4. TEXCOORD_0 (semantic 4) - Raw un-modified UV coordinate array
+  // 4. TEXCOORD_0 (semantic 4) - Must match master vertexCount per glTF 2.0 spec
   const rawUV0 = extractChannelFloat32(sourceMesh.vertexData, 4);
-  if (rawUV0 && rawUV0.length > 0) {
-    const convertedUV0 = convertUVsArray(rawUV0);
+  if (rawUV0 && rawUV0.length >= 2) {
+    let convertedUV0 = convertUVsArray(rawUV0);
+    const targetLength = vertexCount * 2;
+    if (convertedUV0.length !== targetLength) {
+      const fixedUVs = new Float32Array(targetLength);
+      fixedUVs.set(convertedUV0.subarray(0, Math.min(convertedUV0.length, targetLength)));
+      convertedUV0 = fixedUVs;
+    }
     uv0Accessor = doc
       .createAccessor()
       .setName(`${meshName}_uv0`)
@@ -76,11 +99,11 @@ export function createGltfMesh(
       .setBuffer(buffer);
   }
 
-  // Create primitive per submesh sharing the raw vertex accessors
+  // Create primitive per submesh sharing the vertex accessors
   for (let subIdx = 0; subIdx < sourceMesh.subMeshes.length; subIdx++) {
     const rawIndices = extractSubmeshIndices(sourceMesh, subIdx);
-    if (!rawIndices || rawIndices.length === 0) {
-      continue; // Skip empty submeshes with 0 indices
+    if (!rawIndices || rawIndices.length < 3) {
+      continue; // Skip empty submeshes with < 3 indices
     }
 
     const primitive = doc.createPrimitive();
