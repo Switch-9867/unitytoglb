@@ -109,6 +109,7 @@ export function parseSourceMesh(yamlContent: string, guid?: string): SourceMesh 
   // Vertex Data
   const vdObj = (d['m_VertexData'] as Record<string, unknown>) || {};
   const vertexCount = (vdObj['m_VertexCount'] as number) ?? 0;
+  const dataSize = (vdObj['m_DataSize'] as number) || (d['m_DataSize'] as number) || 0;
 
   const typelessHex = (vdObj['_typelessdata'] as string) || '';
   const data = typelessHex ? hexToBytes(typelessHex) : new Uint8Array(0);
@@ -124,7 +125,8 @@ export function parseSourceMesh(yamlContent: string, guid?: string): SourceMesh 
       const stream = ch['stream'] ?? 0;
       const offset = ch['offset'] ?? 0;
       const formatCode = ch['format'] ?? 0;
-      const dimension = ch['dimension'] ?? 0;
+      const rawDimension = ch['dimension'] ?? 0;
+      const dimension = rawDimension & 0x0f; // Low 4 bits store actual dimension count
 
       const format = VERTEX_FORMAT_NAMES[formatCode] || 'Float32';
       const elementSize = VERTEX_FORMAT_SIZES[formatCode] || 4;
@@ -146,7 +148,8 @@ export function parseSourceMesh(yamlContent: string, guid?: string): SourceMesh 
     }
   }
 
-  const strideBytes = calculatedStride;
+  const expectedStride = (dataSize > 0 && vertexCount > 0) ? Math.floor(dataSize / vertexCount) : 0;
+  const strideBytes = Math.max(calculatedStride, expectedStride);
 
   const vertexData: VertexData = {
     vertexCount,
