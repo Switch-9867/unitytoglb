@@ -1,4 +1,5 @@
 // Convert SourceMesh to @gltf-transform/core Mesh, Primitives, and Accessors
+// Reimplemented with submesh vertex range slicing & per-renderer inverse-transform matrix support
 
 import { Document, Buffer, Mesh, Primitive, Material, Accessor } from '@gltf-transform/core';
 import { SourceMesh } from '../model/types.js';
@@ -17,153 +18,17 @@ export interface MeshSubmeshRange {
   subMeshCount?: number;
 }
 
-export interface SharedVertexAccessors {
-  posAccessor: Accessor | null;
-  normAccessor: Accessor | null;
-  tanAccessor: Accessor | null;
-  uv0Accessor: Accessor | null;
-}
-
-export function createSharedVertexAccessors(
-  doc: Document,
-  buffer: Buffer,
-  sourceMesh: SourceMesh,
-  positionTransform?: Matrix4 | null
-): SharedVertexAccessors {
-  const meshName = String(sourceMesh.name || 'Mesh');
-
-  let posAccessor: Accessor | null = null;
-  let normAccessor: Accessor | null = null;
-  let tanAccessor: Accessor | null = null;
-  let uv0Accessor: Accessor | null = null;
-
-  // 1. POSITION (semantic 0)
-  const rawPositions = extractChannelFloat32(sourceMesh.vertexData, 0);
-  if (!rawPositions || rawPositions.length < 3) {
-    return { posAccessor: null, normAccessor: null, tanAccessor: null, uv0Accessor: null };
-  }
-
-  // Transform raw position points by globalInverseTransform for static batched meshes
-  let positionsToConvert = rawPositions;
-  if (positionTransform) {
-    positionsToConvert = new Float32Array(rawPositions.length);
-    for (let i = 0; i < rawPositions.length; i += 3) {
-      const pt = transformPoint3D(positionTransform, {
-        x: rawPositions[i],
-        y: rawPositions[i + 1],
-        z: rawPositions[i + 2],
-      });
-      positionsToConvert[i] = pt.x;
-      positionsToConvert[i + 1] = pt.y;
-      positionsToConvert[i + 2] = pt.z;
-    }
-  }
-
-  const convertedPositions = convertPositionsArray(positionsToConvert);
-  const vertexCount = Math.floor(convertedPositions.length / 3);
-  if (vertexCount === 0) {
-    return { posAccessor: null, normAccessor: null, tanAccessor: null, uv0Accessor: null };
-  }
-
-  posAccessor = doc
-    .createAccessor()
-    .setName(`${meshName}_pos`)
-    .setType('VEC3')
-    .setArray(convertedPositions)
-    .setBuffer(buffer);
-
-  // 2. NORMAL (semantic 1)
-  const rawNormals = extractChannelFloat32(sourceMesh.vertexData, 1);
-  if (rawNormals && rawNormals.length >= 3) {
-    let normalsToConvert = rawNormals;
-    if (positionTransform) {
-      normalsToConvert = new Float32Array(rawNormals.length);
-      for (let i = 0; i < rawNormals.length; i += 3) {
-        const vec = transformVector3D(positionTransform, {
-          x: rawNormals[i],
-          y: rawNormals[i + 1],
-          z: rawNormals[i + 2],
-        });
-        const len = Math.hypot(vec.x, vec.y, vec.z) || 1.0;
-        normalsToConvert[i] = vec.x / len;
-        normalsToConvert[i + 1] = vec.y / len;
-        normalsToConvert[i + 2] = vec.z / len;
-      }
-    }
-
-    let convertedNormals = convertNormalsArray(normalsToConvert);
-    const targetLength = vertexCount * 3;
-    if (convertedNormals.length !== targetLength) {
-      const fixedNorms = new Float32Array(targetLength);
-      fixedNorms.set(convertedNormals.subarray(0, Math.min(convertedNormals.length, targetLength)));
-      convertedNormals = fixedNorms;
-    }
-    normAccessor = doc
-      .createAccessor()
-      .setName(`${meshName}_norm`)
-      .setType('VEC3')
-      .setArray(convertedNormals)
-      .setBuffer(buffer);
-  }
-
-  // 3. TANGENT (semantic 2)
-  const rawTangents = extractChannelFloat32(sourceMesh.vertexData, 2);
-  if (rawTangents && rawTangents.length >= 4) {
-    let convertedTangents = convertTangentsArray(rawTangents);
-    const targetLength = vertexCount * 4;
-    if (convertedTangents.length !== targetLength) {
-      const fixedTans = new Float32Array(targetLength);
-      fixedTans.set(convertedTangents.subarray(0, Math.min(convertedTangents.length, targetLength)));
-      convertedTangents = fixedTans;
-    }
-    tanAccessor = doc
-      .createAccessor()
-      .setName(`${meshName}_tan`)
-      .setType('VEC4')
-      .setArray(convertedTangents)
-      .setBuffer(buffer);
-  }
-
-  // 4. TEXCOORD_0 (semantic 4)
-  const rawUV0 = extractChannelFloat32(sourceMesh.vertexData, 4);
-  if (rawUV0 && rawUV0.length >= 2) {
-    let convertedUV0 = convertUVsArray(rawUV0);
-    const targetLength = vertexCount * 2;
-    if (convertedUV0.length !== targetLength) {
-      const fixedUVs = new Float32Array(targetLength);
-      fixedUVs.set(convertedUV0.subarray(0, Math.min(convertedUV0.length, targetLength)));
-      convertedUV0 = fixedUVs;
-    }
-    uv0Accessor = doc
-      .createAccessor()
-      .setName(`${meshName}_uv0`)
-      .setType('VEC2')
-      .setArray(convertedUV0)
-      .setBuffer(buffer);
-  }
-
-  return { posAccessor, normAccessor, tanAccessor, uv0Accessor };
-}
-
 export function createGltfMesh(
   doc: Document,
   buffer: Buffer,
   sourceMesh: SourceMesh,
   materials?: (Material | null)[],
   submeshRange?: MeshSubmeshRange,
-  existingAccessors?: SharedVertexAccessors
+  posTransform?: Matrix4 | null
 ): Mesh {
   const meshName = String(sourceMesh.name || 'Mesh');
   const mesh = doc.createMesh(meshName);
 
-  const accessors = existingAccessors || createSharedVertexAccessors(doc, buffer, sourceMesh);
-  if (!accessors.posAccessor) {
-    return mesh;
-  }
-
-  const { posAccessor, normAccessor, tanAccessor, uv0Accessor } = accessors;
-
-  // Determine submesh range (support Unity static batching submesh slicing)
   const startSub = submeshRange?.firstSubMesh ?? 0;
   const countSub = submeshRange?.subMeshCount && submeshRange.subMeshCount > 0
     ? submeshRange.subMeshCount
@@ -171,25 +36,139 @@ export function createGltfMesh(
 
   const endSub = Math.min(sourceMesh.subMeshes.length, startSub + countSub);
 
-  // Create primitive per submesh sharing the vertex accessors
+  // Extract raw channels
+  const rawPositionsAll = extractChannelFloat32(sourceMesh.vertexData, 0);
+  if (!rawPositionsAll || rawPositionsAll.length < 3) {
+    return mesh;
+  }
+  const rawNormalsAll = extractChannelFloat32(sourceMesh.vertexData, 1);
+  const rawTangentsAll = extractChannelFloat32(sourceMesh.vertexData, 2);
+  const rawUV0All = extractChannelFloat32(sourceMesh.vertexData, 4);
+
+  const totalVertices = Math.floor(rawPositionsAll.length / 3);
+
+  // Create primitive per submesh
   for (let subIdx = startSub; subIdx < endSub; subIdx++) {
+    const submesh = sourceMesh.subMeshes[subIdx];
     const rawIndices = extractSubmeshIndices(sourceMesh, subIdx);
     if (!rawIndices || rawIndices.length < 3) {
-      continue; // Skip empty submeshes with < 3 indices
+      continue;
     }
 
+    // Determine vertex slice range for this submesh
+    let firstV = submesh?.firstVertex ?? 0;
+    let vCount = submesh?.vertexCount && submesh.vertexCount > 0 ? submesh.vertexCount : totalVertices - firstV;
+
+    if (firstV >= totalVertices) {
+      firstV = 0;
+      vCount = totalVertices;
+    } else if (firstV + vCount > totalVertices) {
+      vCount = totalVertices - firstV;
+    }
+
+    // If submesh vertexCount is invalid or covers full range, fallback to full mesh
+    if (vCount <= 0) {
+      firstV = 0;
+      vCount = totalVertices;
+    }
+
+    // 1. POSITION slice
+    let posSlice = rawPositionsAll.subarray(firstV * 3, (firstV + vCount) * 3);
+    if (posTransform) {
+      const transformedPos = new Float32Array(posSlice.length);
+      for (let i = 0; i < posSlice.length; i += 3) {
+        const pt = transformPoint3D(posTransform, {
+          x: posSlice[i],
+          y: posSlice[i + 1],
+          z: posSlice[i + 2],
+        });
+        transformedPos[i] = pt.x;
+        transformedPos[i + 1] = pt.y;
+        transformedPos[i + 2] = pt.z;
+      }
+      posSlice = transformedPos;
+    }
+
+    const convertedPositions = convertPositionsArray(posSlice);
+    const sliceVertexCount = Math.floor(convertedPositions.length / 3);
+    if (sliceVertexCount === 0) continue;
+
+    const posAccessor = doc
+      .createAccessor()
+      .setName(`${meshName}_sub${subIdx}_pos`)
+      .setType('VEC3')
+      .setArray(convertedPositions)
+      .setBuffer(buffer);
+
     const primitive = doc.createPrimitive();
-
     primitive.setAttribute('POSITION', posAccessor);
-    if (normAccessor) primitive.setAttribute('NORMAL', normAccessor);
-    if (tanAccessor) primitive.setAttribute('TANGENT', tanAccessor);
-    if (uv0Accessor) primitive.setAttribute('TEXCOORD_0', uv0Accessor);
 
-    // Raw indices with winding order reversal for glTF right-handed space
-    const reversedIndices = reverseTriangleWinding(rawIndices);
+    // 2. NORMAL slice
+    if (rawNormalsAll && rawNormalsAll.length >= (firstV + sliceVertexCount) * 3) {
+      let normSlice = rawNormalsAll.subarray(firstV * 3, (firstV + sliceVertexCount) * 3);
+      if (posTransform) {
+        const transformedNorm = new Float32Array(normSlice.length);
+        for (let i = 0; i < normSlice.length; i += 3) {
+          const vec = transformVector3D(posTransform, {
+            x: normSlice[i],
+            y: normSlice[i + 1],
+            z: normSlice[i + 2],
+          });
+          const len = Math.hypot(vec.x, vec.y, vec.z) || 1.0;
+          transformedNorm[i] = vec.x / len;
+          transformedNorm[i + 1] = vec.y / len;
+          transformedNorm[i + 2] = vec.z / len;
+        }
+        normSlice = transformedNorm;
+      }
+
+      const convertedNormals = convertNormalsArray(normSlice);
+      const normAccessor = doc
+        .createAccessor()
+        .setName(`${meshName}_sub${subIdx}_norm`)
+        .setType('VEC3')
+        .setArray(convertedNormals)
+        .setBuffer(buffer);
+      primitive.setAttribute('NORMAL', normAccessor);
+    }
+
+    // 3. TANGENT slice
+    if (rawTangentsAll && rawTangentsAll.length >= (firstV + sliceVertexCount) * 4) {
+      const tanSlice = rawTangentsAll.subarray(firstV * 4, (firstV + sliceVertexCount) * 4);
+      const convertedTangents = convertTangentsArray(tanSlice);
+      const tanAccessor = doc
+        .createAccessor()
+        .setName(`${meshName}_sub${subIdx}_tan`)
+        .setType('VEC4')
+        .setArray(convertedTangents)
+        .setBuffer(buffer);
+      primitive.setAttribute('TANGENT', tanAccessor);
+    }
+
+    // 4. TEXCOORD_0 slice
+    if (rawUV0All && rawUV0All.length >= (firstV + sliceVertexCount) * 2) {
+      const uv0Slice = rawUV0All.subarray(firstV * 2, (firstV + sliceVertexCount) * 2);
+      const convertedUV0 = convertUVsArray(uv0Slice);
+      const uv0Accessor = doc
+        .createAccessor()
+        .setName(`${meshName}_sub${subIdx}_uv0`)
+        .setType('VEC2')
+        .setArray(convertedUV0)
+        .setBuffer(buffer);
+      primitive.setAttribute('TEXCOORD_0', uv0Accessor);
+    }
+
+    // 5. INDICES (re-indexed relative to firstV)
+    const reindexed = new Uint32Array(rawIndices.length);
+    for (let i = 0; i < rawIndices.length; i++) {
+      const idx = rawIndices[i];
+      reindexed[i] = idx >= firstV ? idx - firstV : idx;
+    }
+
+    const reversedIndices = reverseTriangleWinding(reindexed);
     const indexAccessor = doc
       .createAccessor()
-      .setName(`${meshName}_indices_${subIdx}`)
+      .setName(`${meshName}_sub${subIdx}_indices`)
       .setType('SCALAR')
       .setArray(reversedIndices)
       .setBuffer(buffer);
@@ -197,7 +176,7 @@ export function createGltfMesh(
     primitive.setIndices(indexAccessor);
     primitive.setMode(Primitive.Mode.TRIANGLES);
 
-    // Attach material if provided for submesh (index relative to startSub)
+    // Attach material if provided for submesh
     const matIndex = subIdx - startSub;
     if (materials && materials[matIndex]) {
       primitive.setMaterial(materials[matIndex]!);
