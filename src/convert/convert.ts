@@ -25,6 +25,7 @@ export interface ConvertOptions {
   skipTextures?: boolean;
   separateTextures?: boolean;
   texturesDir?: string; // relative or absolute folder name for external textures
+  rotateYUp?: boolean;
 }
 
 export function convertSourceBundleToGltf(bundle: SourceBundle, options?: ConvertOptions): Document {
@@ -100,7 +101,12 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     }
   }
 
-  const { scene, nodeMap } = createGltfSceneGraph(doc, bundle.scene, (nodeFileId) => nodeMeshMap.get(nodeFileId) || null);
+  const { scene, nodeMap } = createGltfSceneGraph(
+    doc,
+    bundle.scene,
+    (nodeFileId) => nodeMeshMap.get(nodeFileId) || null,
+    { rotateYUp: options?.rotateYUp }
+  );
 
   for (const nodeFileId of staticNodeFileIds) {
     const node = nodeMap.get(nodeFileId);

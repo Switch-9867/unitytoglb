@@ -6,10 +6,15 @@ import { convertPosition, convertRotation, convertScale } from './coords.js';
 import { attachGltfLight } from './lights.js';
 import { attachGltfCamera } from './cameras.js';
 
+export interface SceneGraphOptions {
+  rotateYUp?: boolean;
+}
+
 export function createGltfSceneGraph(
   doc: Document,
   sourceScene: SourceScene,
-  getMeshForNode?: (nodeFileId: number) => Mesh | null
+  getMeshForNode?: (nodeFileId: number) => Mesh | null,
+  options?: SceneGraphOptions
 ): { scene: Scene; nodeMap: Map<number, Node> } {
   const scene = doc.createScene(String(sourceScene.name || 'Scene'));
   const nodeMap = new Map<number, Node>();
@@ -72,10 +77,20 @@ export function createGltfSceneGraph(
   }
 
   // 5. Add root nodes to glTF Scene in rootOrder
+  // If rotateYUp is enabled, wrap top-level root nodes in a master SceneRoot with +90 deg X rotation
+  let parentContainer: Scene | Node = scene;
+  if (options?.rotateYUp) {
+    const masterRoot = doc.createNode('SceneRoot');
+    // +90 deg X rotation (x = 0.7071068, w = 0.7071068) to orient +Y Up
+    masterRoot.setRotation([0.7071067811865475, 0, 0, 0.7071067811865476]);
+    scene.addChild(masterRoot);
+    parentContainer = masterRoot;
+  }
+
   for (const rootFileId of sourceScene.rootNodeFileIds) {
     const rootNode = nodeMap.get(rootFileId);
     if (rootNode) {
-      scene.addChild(rootNode);
+      parentContainer.addChild(rootNode);
     }
   }
 

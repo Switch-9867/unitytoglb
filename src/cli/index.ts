@@ -22,6 +22,7 @@ interface CliArgs {
   skipTextures: boolean;
   separateTextures: boolean;
   texturesDir?: string;
+  rotateYUp: boolean;
   optimize: boolean;
   quiet: boolean;
   help: boolean;
@@ -32,6 +33,7 @@ function parseArgs(args: string[]): CliArgs {
     targetPath: '.',
     skipTextures: false,
     separateTextures: false,
+    rotateYUp: false,
     optimize: false,
     quiet: false,
     help: false,
@@ -45,6 +47,8 @@ function parseArgs(args: string[]): CliArgs {
       result.quiet = true;
     } else if (arg === '-O' || arg === '--optimize') {
       result.optimize = true;
+    } else if (arg === '--rotate-y-up' || arg === '-ry') {
+      result.rotateYUp = true;
     } else if (arg === '--skip-textures' || arg === '--no-textures' || arg === '-nt') {
       result.skipTextures = true;
     } else if (arg === '--separate-textures' || arg === '--separate' || arg === '-st') {
@@ -86,6 +90,7 @@ Options:
   --skip-textures, -nt        Skip loading and embedding textures completely (super fast & lightweight)
   --separate-textures, -st   Extract textures to separate files instead of embedding in GLB
   --textures-dir, -td <dir>   Directory name/path for extracted textures (default: textures)
+  --rotate-y-up, -ry          Apply +90 deg X master root node rotation to orient scene +Y Up
   -O, --optimize              Apply geometry welding, accessor deduplication, and mesh quantization
   -q, --quiet                 Suppress non-error logging
   -h, --help                  Show this help message
@@ -94,8 +99,8 @@ Examples:
   # Export full scene without any textures (lightweight geometry & material colors)
   scene-to-gltf . --skip-textures -o ORGANIZM_no_textures.glb
 
-  # Export full scene as glTF JSON with separate textures/ folder
-  scene-to-gltf . --separate-textures --textures-dir textures -o ORGANIZM.gltf
+  # Export full scene oriented +Y Up
+  scene-to-gltf . --skip-textures --rotate-y-up -o ORGANIZM_yup.glb
 `);
 }
 
@@ -151,6 +156,7 @@ async function main() {
     skipTextures: args.skipTextures,
     separateTextures: args.separateTextures,
     texturesDir: args.texturesDir || 'textures',
+    rotateYUp: args.rotateYUp,
   };
 
   const isGltfFormat = args.format === 'gltf' || (args.separateTextures && !args.skipTextures);
@@ -159,7 +165,10 @@ async function main() {
 
   log('\n[3] Converting to glTF 2.0...');
   if (args.optimize) {
-    log('    Applying Optimization Pipeline (weld, dedup, prune, quantize)...');
+    log('    Applying Optimization Pipeline...');
+  }
+  if (args.rotateYUp) {
+    log('    [Option] Applying SceneRoot +90 deg X rotation for +Y Up orientation');
   }
 
   const startConvert = Date.now();
