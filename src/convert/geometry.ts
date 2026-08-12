@@ -11,11 +11,17 @@ import {
   reverseTriangleWinding,
 } from './coords.js';
 
+export interface MeshSubmeshRange {
+  firstSubMesh?: number;
+  subMeshCount?: number;
+}
+
 export function createGltfMesh(
   doc: Document,
   buffer: Buffer,
   sourceMesh: SourceMesh,
-  materials?: (Material | null)[]
+  materials?: (Material | null)[],
+  submeshRange?: MeshSubmeshRange
 ): Mesh {
   const meshName = String(sourceMesh.name || 'Mesh');
   const mesh = doc.createMesh(meshName);
@@ -99,8 +105,16 @@ export function createGltfMesh(
       .setBuffer(buffer);
   }
 
+  // Determine submesh range (support Unity static batching submesh slicing)
+  const startSub = submeshRange?.firstSubMesh ?? 0;
+  const countSub = submeshRange?.subMeshCount && submeshRange.subMeshCount > 0
+    ? submeshRange.subMeshCount
+    : sourceMesh.subMeshes.length - startSub;
+
+  const endSub = Math.min(sourceMesh.subMeshes.length, startSub + countSub);
+
   // Create primitive per submesh sharing the vertex accessors
-  for (let subIdx = 0; subIdx < sourceMesh.subMeshes.length; subIdx++) {
+  for (let subIdx = startSub; subIdx < endSub; subIdx++) {
     const rawIndices = extractSubmeshIndices(sourceMesh, subIdx);
     if (!rawIndices || rawIndices.length < 3) {
       continue; // Skip empty submeshes with < 3 indices
@@ -125,9 +139,10 @@ export function createGltfMesh(
     primitive.setIndices(indexAccessor);
     primitive.setMode(Primitive.Mode.TRIANGLES);
 
-    // Attach material if provided for submesh
-    if (materials && materials[subIdx]) {
-      primitive.setMaterial(materials[subIdx]!);
+    // Attach material if provided for submesh (index relative to startSub)
+    const matIndex = subIdx - startSub;
+    if (materials && materials[matIndex]) {
+      primitive.setMaterial(materials[matIndex]!);
     }
 
     mesh.addPrimitive(primitive);

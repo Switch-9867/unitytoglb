@@ -424,8 +424,12 @@ export function parseRawDocsToSourceScene(rawDocs: RawYamlDocument[], sceneName:
   }
   for (const r of renderers) {
     const mf = meshFilterMapByNode.get(r.nodeFileId);
-    if (mf && mf.meshRef && mf.meshRef.guid) {
-      r.meshGuid = mf.meshRef.guid;
+    if (mf && mf.meshRef) {
+      if (mf.meshRef.guid && mf.meshRef.guid !== '0000000000000000e000000000000000') {
+        r.meshGuid = mf.meshRef.guid;
+      } else if (mf.meshRef.fileID) {
+        r.meshGuid = `builtin_${mf.meshRef.fileID}`;
+      }
     }
   }
 

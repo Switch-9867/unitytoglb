@@ -2,7 +2,7 @@
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { Document, NodeIO } from '@gltf-transform/core';
+import { Document, NodeIO, Mesh, Material } from '@gltf-transform/core';
 import { KHRTextureTransform, KHRLightsPunctual } from '@gltf-transform/extensions';
 import { prune, dedup } from '@gltf-transform/functions';
 import { SourceScene, SourceMesh, SourceMaterial } from '../model/types.js';
@@ -36,38 +36,46 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     : undefined;
 
   // 1. Convert Materials
-  const gltfMaterialMap = new Map<string, ReturnType<typeof createGltfMaterial>>();
+  const gltfMaterialMap = new Map<string, Material>();
   for (const [guid, mat] of bundle.materials.entries()) {
     const gltfMat = createGltfMaterial(doc, mat, textureCache);
     gltfMaterialMap.set(guid, gltfMat);
   }
 
-  // 2. Convert Meshes
-  const gltfMeshMap = new Map<string, ReturnType<typeof createGltfMesh>>();
-  for (const [guid, mesh] of bundle.meshes.entries()) {
-    // Resolve materials for submeshes if present
-    const matList: (ReturnType<typeof createGltfMaterial> | null)[] = [];
-    gltfMeshMap.set(guid, createGltfMesh(doc, buffer, mesh, matList));
-  }
+  // 2. Convert Meshes per Renderer with Per-Renderer Material Binding & Static Batch Submesh Slicing
+  const meshVariantMap = new Map<string, Mesh>();
+  const nodeMeshMap = new Map<number, Mesh>();
 
-  // Map renderer nodeFileId -> glTF Mesh
-  const nodeMeshMap = new Map<number, ReturnType<typeof createGltfMesh>>();
   for (const renderer of bundle.scene.renderers) {
-    if (renderer.meshGuid && gltfMeshMap.has(renderer.meshGuid)) {
-      const gltfMesh = gltfMeshMap.get(renderer.meshGuid)!;
-      nodeMeshMap.set(renderer.nodeFileId, gltfMesh);
-
-      // Attach materials from renderer to primitive
-      for (let subIdx = 0; subIdx < renderer.materialRefs.length; subIdx++) {
-        const matRef = renderer.materialRefs[subIdx];
-        if (matRef.guid && gltfMaterialMap.has(matRef.guid)) {
-          const prim = gltfMesh.listPrimitives()[subIdx];
-          if (prim) {
-            prim.setMaterial(gltfMaterialMap.get(matRef.guid)!);
-          }
-        }
-      }
+    if (!renderer.meshGuid || !bundle.meshes.has(renderer.meshGuid)) {
+      continue;
     }
+
+    const sourceMesh = bundle.meshes.get(renderer.meshGuid)!;
+
+    // Build material list for submeshes of this renderer
+    const matList: (Material | null)[] = [];
+    const matGuidsKeyParts: string[] = [];
+
+    for (let subIdx = 0; subIdx < renderer.materialRefs.length; subIdx++) {
+      const matRef = renderer.materialRefs[subIdx];
+      const gMat = matRef?.guid ? gltfMaterialMap.get(matRef.guid) || null : null;
+      matList.push(gMat);
+      matGuidsKeyParts.push(matRef?.guid || 'none');
+    }
+
+    const firstSub = renderer.staticBatchInfo?.firstSubMesh ?? 0;
+    const subCount = renderer.staticBatchInfo?.subMeshCount ?? 0;
+
+    const variantKey = `${renderer.meshGuid}:sub_${firstSub}_${subCount}:${matGuidsKeyParts.join('_')}`;
+
+    let gltfMesh = meshVariantMap.get(variantKey);
+    if (!gltfMesh) {
+      gltfMesh = createGltfMesh(doc, buffer, sourceMesh, matList, renderer.staticBatchInfo);
+      meshVariantMap.set(variantKey, gltfMesh);
+    }
+
+    nodeMeshMap.set(renderer.nodeFileId, gltfMesh);
   }
 
   // 3. Convert Scene Hierarchy (including Cameras and Lights)

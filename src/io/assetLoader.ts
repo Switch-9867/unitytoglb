@@ -5,6 +5,7 @@ import { SourceScene, SourceMesh, SourceMaterial } from '../model/types.js';
 import { GuidIndex } from './guidIndex.js';
 import { parseSourceMesh } from '../parse/mesh.js';
 import { parseSourceMaterial } from '../parse/material.js';
+import { createBuiltinPrimitiveMesh } from '../parse/builtinPrimitives.js';
 import { SourceBundle } from '../convert/convert.js';
 
 export interface AssetLoadingReport {
@@ -37,6 +38,13 @@ export function loadAssetsForScene(scene: SourceScene, guidIndex: GuidIndex): So
 
   const missingMeshGuids: string[] = [];
   for (const guid of meshGuids) {
+    if (guid.startsWith('builtin_') || guid === '0000000000000000e000000000000000') {
+      const fileId = parseInt(guid.replace('builtin_', ''), 10) || 10202;
+      const mesh = createBuiltinPrimitiveMesh(fileId);
+      meshes.set(guid, mesh);
+      continue;
+    }
+
     const entry = guidIndex.get(guid);
     if (entry && fs.existsSync(entry.assetPath)) {
       try {
