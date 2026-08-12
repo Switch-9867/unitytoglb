@@ -1,5 +1,5 @@
 // Orchestrate conversion from SourceScene + Assets to glTF Document / GLB / GLTF
-// 100% 1:1 AssetRipper hierarchy conversion with submesh positionTransform & normalTransform baking
+// 100% 1:1 AssetRipper hierarchy conversion with exact submesh inverse transform matrix baking
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -45,8 +45,7 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     gltfMaterialMap.set(guid, gltfMat);
   }
 
-  // 2. Compute Global Transforms & Inverse Transforms for all Nodes (matching AssetRipper GlbLevelBuilder)
-  const nodeGlobalTransformMap = new Map<number, Matrix4>();
+  // 2. Compute Global Inverse Transforms for all Nodes
   const nodeGlobalInverseTransformMap = new Map<number, Matrix4>();
 
   function computeNodeTransforms(fileID: number, parentGlobal: Matrix4) {
@@ -57,7 +56,6 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     const globalMat = multiplyMatrices(parentGlobal, localMat);
     const invGlobalMat = invertMatrix(globalMat) || createIdentityMatrix();
 
-    nodeGlobalTransformMap.set(fileID, globalMat);
     nodeGlobalInverseTransformMap.set(fileID, invGlobalMat);
 
     for (const childId of node.childFileIds) {
@@ -82,11 +80,7 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     const sourceMesh = bundle.meshes.get(renderer.meshGuid)!;
     const isStaticBatch = !!(renderer.staticBatchInfo && renderer.staticBatchInfo.subMeshCount > 0);
 
-    // Matching AssetRipper GlbLevelBuilder:
-    // positionTransform = globalInverseTransform (for static mesh)
-    // normalTransform = globalTransform (for static mesh)
     const posTransform = isStaticBatch ? nodeGlobalInverseTransformMap.get(renderer.nodeFileId) || null : null;
-    const normTransform = isStaticBatch ? nodeGlobalTransformMap.get(renderer.nodeFileId) || null : null;
 
     // Build material list for submeshes of this renderer
     const matList: (Material | null)[] = [];
@@ -107,7 +101,7 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
 
     let gltfMesh = meshVariantMap.get(variantKey);
     if (!gltfMesh) {
-      gltfMesh = createGltfMesh(doc, buffer, sourceMesh, matList, renderer.staticBatchInfo, posTransform, normTransform);
+      gltfMesh = createGltfMesh(doc, buffer, sourceMesh, matList, renderer.staticBatchInfo, posTransform);
       meshVariantMap.set(variantKey, gltfMesh);
     }
 

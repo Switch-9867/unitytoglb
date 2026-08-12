@@ -1,5 +1,5 @@
 // Convert SourceMesh to @gltf-transform/core Mesh, Primitives, and Accessors
-// Reimplemented matching AssetRipper GlbSubMeshBuilder positionTransform & normalTransform pipeline
+// Reimplemented matching exact 3D inverse transform vector rotation for static batching
 
 import { Document, Buffer, Mesh, Primitive, Material, Accessor } from '@gltf-transform/core';
 import { SourceMesh } from '../model/types.js';
@@ -24,8 +24,7 @@ export function createGltfMesh(
   sourceMesh: SourceMesh,
   materials?: (Material | null)[],
   submeshRange?: MeshSubmeshRange,
-  posTransform?: Matrix4 | null,
-  normTransform?: Matrix4 | null
+  posTransform?: Matrix4 | null
 ): Mesh {
   const meshName = String(sourceMesh.name || 'Mesh');
   const mesh = doc.createMesh(meshName);
@@ -67,7 +66,6 @@ export function createGltfMesh(
       vCount = totalVertices - firstV;
     }
 
-    // If submesh vertexCount is invalid or covers full range, fallback to full mesh
     if (vCount <= 0) {
       firstV = 0;
       vCount = totalVertices;
@@ -104,13 +102,13 @@ export function createGltfMesh(
     const primitive = doc.createPrimitive();
     primitive.setAttribute('POSITION', posAccessor);
 
-    // 2. NORMAL slice (transformed by normTransform = globalTransform, matching AssetRipper)
+    // 2. NORMAL slice (transformed by 3x3 rotation of posTransform = globalInverseTransform)
     if (rawNormalsAll && rawNormalsAll.length >= (firstV + sliceVertexCount) * 3) {
       let normSlice = rawNormalsAll.subarray(firstV * 3, (firstV + sliceVertexCount) * 3);
-      if (normTransform) {
+      if (posTransform) {
         const transformedNorm = new Float32Array(normSlice.length);
         for (let i = 0; i < normSlice.length; i += 3) {
-          const vec = transformVector3D(normTransform, {
+          const vec = transformVector3D(posTransform, {
             x: normSlice[i],
             y: normSlice[i + 1],
             z: normSlice[i + 2],
@@ -133,13 +131,13 @@ export function createGltfMesh(
       primitive.setAttribute('NORMAL', normAccessor);
     }
 
-    // 3. TANGENT slice (transformed by normTransform = globalTransform)
+    // 3. TANGENT slice
     if (rawTangentsAll && rawTangentsAll.length >= (firstV + sliceVertexCount) * 4) {
       let tanSlice = rawTangentsAll.subarray(firstV * 4, (firstV + sliceVertexCount) * 4);
-      if (normTransform) {
+      if (posTransform) {
         const transformedTan = new Float32Array(tanSlice.length);
         for (let i = 0; i < tanSlice.length; i += 4) {
-          const vec = transformVector3D(normTransform, {
+          const vec = transformVector3D(posTransform, {
             x: tanSlice[i],
             y: tanSlice[i + 1],
             z: tanSlice[i + 2],

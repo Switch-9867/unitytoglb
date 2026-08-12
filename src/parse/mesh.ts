@@ -1,37 +1,40 @@
 // Unity Mesh asset (.asset) binary parser & multi-stream channel decoder
-// Reimplemented from AssetRipper's C# MeshExtensions & VertexDataBlob
+// Reimplemented matching AssetRipper Unity 2017/2018 MeshHelper & VertexDataBlob
 
 import { SourceMesh, SubMesh, VertexData, VertexChannel, VertexFormat, Vec3 } from '../model/types.js';
 import { parseUnityYamlFile } from './yaml.js';
 
-export const VERTEX_FORMAT_SIZES: Record<number, number> = {
+// Unity 2017/2018 Vertex Format Component Byte Sizes matching AssetRipper MeshHelper.VertexFormat2017
+export const VERTEX_FORMAT_SIZES_2017: Record<number, number> = {
   0: 4, // Float32
   1: 2, // Float16
-  2: 1, // UNorm8
-  3: 1, // SNorm8
-  4: 2, // UNorm16
-  5: 2, // SNorm16
-  6: 1, // UInt8
-  7: 1, // SInt8
-  8: 2, // UInt16
-  9: 2, // SInt16
-  10: 4, // UInt32
-  11: 4, // SInt32
+  2: 1, // Color / UNorm8 (4 bytes total for RGBA)
+  3: 1, // UNorm8
+  4: 1, // SNorm8
+  5: 2, // UNorm16
+  6: 2, // SNorm16
+  7: 1, // UInt8
+  8: 1, // SInt8
+  9: 2, // UInt16
+  10: 2, // SInt16
+  11: 4, // UInt32
+  12: 4, // SInt32
 };
 
-export const VERTEX_FORMAT_NAMES: Record<number, VertexFormat> = {
+export const VERTEX_FORMAT_NAMES_2017: Record<number, VertexFormat> = {
   0: 'Float32',
   1: 'Float16',
   2: 'UNorm8',
-  3: 'SNorm8',
-  4: 'UNorm16',
-  5: 'SNorm16',
-  6: 'UInt8',
-  7: 'SInt8',
-  8: 'UInt16',
-  9: 'SInt16',
-  10: 'UInt32',
-  11: 'SInt32',
+  3: 'UNorm8',
+  4: 'SNorm8',
+  5: 'UNorm16',
+  6: 'SNorm16',
+  7: 'UInt8',
+  8: 'SInt8',
+  9: 'UInt16',
+  10: 'SInt16',
+  11: 'UInt32',
+  12: 'SInt32',
 };
 
 export interface VertexStreamInfo {
@@ -120,7 +123,7 @@ export function parseSourceMesh(yamlContent: string, guid?: string): SourceMesh 
   const typelessHex = (vdObj['_typelessdata'] as string) || '';
   const data = typelessHex ? hexToBytes(typelessHex) : new Uint8Array(0);
 
-  // Parse Channels
+  // Parse Channels (Unity 2017/2018 mapping)
   const rawChannels = vdObj['m_Channels'];
   const channels: VertexChannel[] = [];
   let maxStream = 0;
@@ -134,8 +137,8 @@ export function parseSourceMesh(yamlContent: string, guid?: string): SourceMesh 
       const rawDimension = ch['dimension'] ?? 0;
       const dimension = rawDimension & 0x0f; // Low 4 bits store actual dimension count
 
-      const format = VERTEX_FORMAT_NAMES[formatCode] || 'Float32';
-      const elementSize = VERTEX_FORMAT_SIZES[formatCode] || 4;
+      const format = VERTEX_FORMAT_NAMES_2017[formatCode] || 'Float32';
+      const elementSize = VERTEX_FORMAT_SIZES_2017[formatCode] || 4;
       const sizeBytes = elementSize * dimension;
 
       if (stream > maxStream) maxStream = stream;
@@ -219,8 +222,8 @@ export function parseSourceMesh(yamlContent: string, guid?: string): SourceMesh 
 }
 
 /**
- * Decode a vertex attribute channel (e.g. semantic 0 for POSITION) into a Float32Array
- * using AssetRipper multi-stream offsets.
+ * Decode a vertex attribute channel into a Float32Array
+ * Target output dimensions: POSITION = 3 (VEC3), NORMAL = 3 (VEC3), TANGENT = 4 (VEC4), TEXCOORD = 2 (VEC2)
  */
 export function extractChannelFloat32(vd: VertexData, semantic: number): Float32Array | null {
   const channel = vd.channels.find((c) => c.semantic === semantic && c.dimension > 0);
@@ -239,53 +242,73 @@ export function extractChannelFloat32(vd: VertexData, semantic: number): Float32
   const validVertexCount = Math.min(vd.vertexCount, Math.max(0, maxVertices));
   if (validVertexCount === 0) return null;
 
-  const result = new Float32Array(validVertexCount * channel.dimension);
+  // Target output dimension per semantic to match glTF standards
+  let targetDimension = channel.dimension;
+  if (semantic === 0 || semantic === 1) {
+    targetDimension = 3; // POSITION & NORMAL are always VEC3
+  } else if (semantic === 2) {
+    targetDimension = 4; // TANGENT is always VEC4
+  } else if (semantic === 4) {
+    targetDimension = 2; // TEXCOORD_0 is always VEC2
+  }
+
+  const result = new Float32Array(validVertexCount * targetDimension);
   const view = new DataView(vd.data.buffer, vd.data.byteOffset, totalBytes);
+  const elementSize = VERTEX_FORMAT_SIZES_2017[channel.formatCode] || 4;
 
   for (let v = 0; v < validVertexCount; v++) {
     const vertexStart = streamInfo.offsetBytes + channel.offset + v * streamInfo.strideBytes;
 
-    for (let d = 0; d < channel.dimension; d++) {
-      const elementSize = VERTEX_FORMAT_SIZES[channel.formatCode] || 4;
-      const pos = vertexStart + d * elementSize;
+    for (let d = 0; d < targetDimension; d++) {
       let val = 0;
-
-      if (pos >= 0 && pos + elementSize <= totalBytes) {
-        switch (channel.formatCode) {
-          case 0: // Float32
-            val = view.getFloat32(pos, true);
-            break;
-          case 1: // Float16
-            val = float16ToFloat32(view.getUint16(pos, true));
-            break;
-          case 2: // UNorm8
-            val = view.getUint8(pos) / 255.0;
-            break;
-          case 3: // SNorm8
-            val = Math.max(-1.0, view.getInt8(pos) / 127.0);
-            break;
-          case 4: // UNorm16
-            val = view.getUint16(pos, true) / 65535.0;
-            break;
-          case 5: // SNorm16
-            val = Math.max(-1.0, view.getInt16(pos, true) / 32767.0);
-            break;
-          case 6: // UInt8
-          case 7: // SInt8
-            val = channel.formatCode === 6 ? view.getUint8(pos) : view.getInt8(pos);
-            break;
-          case 8: // UInt16
-          case 9: // SInt16
-            val = channel.formatCode === 8 ? view.getUint16(pos, true) : view.getInt16(pos, true);
-            break;
-          case 10: // UInt32
-          case 11: // SInt32
-            val = channel.formatCode === 10 ? view.getUint32(pos, true) : view.getInt32(pos, true);
-            break;
+      if (d < channel.dimension) {
+        const pos = vertexStart + d * elementSize;
+        if (pos >= 0 && pos + elementSize <= totalBytes) {
+          switch (channel.formatCode) {
+            case 0: // Float32
+              val = view.getFloat32(pos, true);
+              break;
+            case 1: // Float16
+              val = float16ToFloat32(view.getUint16(pos, true));
+              break;
+            case 2: // Color (UNorm8)
+            case 3: // UNorm8
+              val = view.getUint8(pos) / 255.0;
+              break;
+            case 4: // SNorm8
+              val = Math.max(-1.0, view.getInt8(pos) / 127.0);
+              break;
+            case 5: // UNorm16
+              val = view.getUint16(pos, true) / 65535.0;
+              break;
+            case 6: // SNorm16
+              val = Math.max(-1.0, view.getInt16(pos, true) / 32767.0);
+              break;
+            case 7: // UInt8
+              val = view.getUint8(pos);
+              break;
+            case 8: // SInt8
+              val = view.getInt8(pos);
+              break;
+            case 9: // UInt16
+              val = view.getUint16(pos, true);
+              break;
+            case 10: // SInt16
+              val = view.getInt16(pos, true);
+              break;
+            case 11: // UInt32
+              val = view.getUint32(pos, true);
+              break;
+            case 12: // SInt32
+              val = view.getInt32(pos, true);
+              break;
+          }
         }
+      } else if (d === 3 && semantic === 2) {
+        val = 1.0; // Default tangent W handedness
       }
 
-      result[v * channel.dimension + d] = val;
+      result[v * targetDimension + d] = val;
     }
   }
 
