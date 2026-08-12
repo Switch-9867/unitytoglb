@@ -1,4 +1,5 @@
-// Unity Mesh asset (.asset) binary parser & channel decoder
+// Unity Mesh asset (.asset) binary parser & multi-stream channel decoder
+// Reimplemented from AssetRipper's C# MeshExtensions & VertexDataBlob
 
 import { SourceMesh, SubMesh, VertexData, VertexChannel, VertexFormat, Vec3 } from '../model/types.js';
 import { parseUnityYamlFile } from './yaml.js';
@@ -32,6 +33,12 @@ export const VERTEX_FORMAT_NAMES: Record<number, VertexFormat> = {
   10: 'UInt32',
   11: 'SInt32',
 };
+
+export interface VertexStreamInfo {
+  streamIndex: number;
+  strideBytes: number;
+  offsetBytes: number;
+}
 
 /**
  * Optimized C++ hex string decoder using Buffer.from
@@ -109,7 +116,6 @@ export function parseSourceMesh(yamlContent: string, guid?: string): SourceMesh 
   // Vertex Data
   const vdObj = (d['m_VertexData'] as Record<string, unknown>) || {};
   const vertexCount = (vdObj['m_VertexCount'] as number) ?? 0;
-  const dataSize = (vdObj['m_DataSize'] as number) || (d['m_DataSize'] as number) || 0;
 
   const typelessHex = (vdObj['_typelessdata'] as string) || '';
   const data = typelessHex ? hexToBytes(typelessHex) : new Uint8Array(0);
@@ -117,7 +123,7 @@ export function parseSourceMesh(yamlContent: string, guid?: string): SourceMesh 
   // Parse Channels
   const rawChannels = vdObj['m_Channels'];
   const channels: VertexChannel[] = [];
-  let calculatedStride = 0;
+  let maxStream = 0;
 
   if (Array.isArray(rawChannels)) {
     for (let semantic = 0; semantic < rawChannels.length; semantic++) {
@@ -132,9 +138,7 @@ export function parseSourceMesh(yamlContent: string, guid?: string): SourceMesh 
       const elementSize = VERTEX_FORMAT_SIZES[formatCode] || 4;
       const sizeBytes = elementSize * dimension;
 
-      if (dimension > 0) {
-        calculatedStride = Math.max(calculatedStride, offset + sizeBytes);
-      }
+      if (stream > maxStream) maxStream = stream;
 
       channels.push({
         semantic,
@@ -148,14 +152,40 @@ export function parseSourceMesh(yamlContent: string, guid?: string): SourceMesh 
     }
   }
 
-  const expectedStride = (dataSize > 0 && vertexCount > 0) ? Math.floor(dataSize / vertexCount) : 0;
-  const strideBytes = Math.max(calculatedStride, expectedStride);
+  // AssetRipper Multi-Stream Alignment Offset Calculation (16-byte alignment per stream)
+  const streams: VertexStreamInfo[] = [];
+  let currentOffset = 0;
+
+  for (let s = 0; s <= maxStream; s++) {
+    let streamStride = 0;
+    for (const ch of channels) {
+      if (ch.stream === s && ch.dimension > 0) {
+        streamStride = Math.max(streamStride, ch.offset + ch.sizeBytes);
+      }
+    }
+
+    streams.push({
+      streamIndex: s,
+      strideBytes: streamStride,
+      offsetBytes: currentOffset,
+    });
+
+    if (streamStride > 0 && vertexCount > 0) {
+      currentOffset += vertexCount * streamStride;
+      // AlignStream: 16-byte alignment after each vertex stream block
+      currentOffset = (currentOffset + 15) & ~15;
+    }
+  }
+
+  const mainStream = streams[0] || { streamIndex: 0, strideBytes: 0, offsetBytes: 0 };
+  const strideBytes = mainStream.strideBytes;
 
   const vertexData: VertexData = {
     vertexCount,
     strideBytes,
     channels,
     data,
+    streams,
   };
 
   // Local AABB
@@ -189,21 +219,31 @@ export function parseSourceMesh(yamlContent: string, guid?: string): SourceMesh 
 }
 
 /**
- * Decode a vertex attribute channel (e.g. semantic 0 for POSITION) into a Float32Array.
+ * Decode a vertex attribute channel (e.g. semantic 0 for POSITION) into a Float32Array
+ * using AssetRipper multi-stream offsets.
  */
 export function extractChannelFloat32(vd: VertexData, semantic: number): Float32Array | null {
   const channel = vd.channels.find((c) => c.semantic === semantic && c.dimension > 0);
-  if (!channel || vd.vertexCount === 0 || vd.data.byteLength === 0 || vd.strideBytes === 0) return null;
+  if (!channel || vd.vertexCount === 0 || vd.data.byteLength === 0) return null;
 
-  const validVertexCount = Math.min(vd.vertexCount, Math.floor(vd.data.byteLength / vd.strideBytes));
+  const streamInfo = vd.streams?.find((s) => s.streamIndex === channel.stream) || {
+    streamIndex: channel.stream,
+    strideBytes: vd.strideBytes,
+    offsetBytes: 0,
+  };
+
+  if (streamInfo.strideBytes === 0) return null;
+
+  const totalBytes = vd.data.byteLength;
+  const maxVertices = Math.floor((totalBytes - streamInfo.offsetBytes) / streamInfo.strideBytes);
+  const validVertexCount = Math.min(vd.vertexCount, Math.max(0, maxVertices));
   if (validVertexCount === 0) return null;
 
   const result = new Float32Array(validVertexCount * channel.dimension);
-  const totalBytes = vd.data.byteLength;
   const view = new DataView(vd.data.buffer, vd.data.byteOffset, totalBytes);
 
-  for (let i = 0; i < validVertexCount; i++) {
-    const vertexStart = i * vd.strideBytes + channel.offset;
+  for (let v = 0; v < validVertexCount; v++) {
+    const vertexStart = streamInfo.offsetBytes + channel.offset + v * streamInfo.strideBytes;
 
     for (let d = 0; d < channel.dimension; d++) {
       const elementSize = VERTEX_FORMAT_SIZES[channel.formatCode] || 4;
@@ -245,7 +285,7 @@ export function extractChannelFloat32(vd: VertexData, semantic: number): Float32
         }
       }
 
-      result[i * channel.dimension + d] = val;
+      result[v * channel.dimension + d] = val;
     }
   }
 

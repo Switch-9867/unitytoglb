@@ -62,6 +62,7 @@ export interface VertexData {
   strideBytes: number;
   channels: VertexChannel[];
   data: Uint8Array;
+  streams?: Array<{ streamIndex: number; strideBytes: number; offsetBytes: number }>;
 }
 
 export interface SubMesh {
