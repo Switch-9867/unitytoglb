@@ -1,40 +1,51 @@
 // Pure coordinate, unit, rotation, winding, and convention transformations
-// Preserves exact local TRS coordinates from Unity scene graph
+// Incorporates Y-axis reflection (-1y) and normal alignment to eliminate scene mirror & lighting artifacts
 
 import { Vec3, Quat, Vec4 } from '../model/types.js';
 
 /**
- * Position conversion: Preserves exact local position coordinates.
- * p' = (p.x, p.y, p.z)
+ * Position conversion: flip Y axis (reflection across XZ plane).
+ * p' = (p.x, -p.y, p.z)
  */
 export function convertPosition(p: Vec3): Vec3 {
-  return { x: p.x || 0, y: p.y || 0, z: p.z || 0 };
+  return { x: p.x || 0, y: -p.y || 0, z: p.z || 0 };
 }
 
 /**
- * Normal / Direction vector conversion & normalize.
- * n' = (n.x, n.y, n.z)
+ * Normal / Direction vector conversion: flip Y axis & normalize.
+ * n' = (n.x, -n.y, n.z)
  */
 export function convertVector(v: Vec3): Vec3 {
-  const len = Math.hypot(v.x, v.y, v.z) || 1.0;
-  return { x: (v.x / len) || 0, y: (v.y / len) || 0, z: (v.z / len) || 0 };
+  const x = v.x || 0;
+  const y = -v.y || 0;
+  const z = v.z || 0;
+  const len = Math.hypot(x, y, z) || 1.0;
+  return { x: x / len, y: y / len, z: z / len };
 }
 
 /**
- * Tangent conversion: normalize (x,y,z) and clamp handedness w to +/-1.
+ * Tangent conversion: flip Y axis, normalize (x,y,z), and invert handedness w for Y-reflection.
+ * t' = (t.x, -t.y, t.z, -t.w)
  */
 export function convertTangent(t: Vec4): Vec4 {
-  const len = Math.hypot(t.x, t.y, t.z) || 1.0;
-  const w = t.w < 0 ? -1.0 : 1.0;
-  return { x: (t.x / len) || 0, y: (t.y / len) || 0, z: (t.z / len) || 0, w };
+  const x = t.x || 0;
+  const y = -t.y || 0;
+  const z = t.z || 0;
+  const rawW = t.w;
+
+  // Invert sign of w for Y-reflection handedness, strictly clamped to +/-1.0
+  const w = rawW < 0 ? 1.0 : -1.0;
+
+  const len = Math.hypot(x, y, z) || 1.0;
+  return { x: x / len, y: y / len, z: z / len, w };
 }
 
 /**
- * Quaternion rotation conversion matching exact Unity local rotation.
- * q' = (q.x, q.y, q.z, q.w)
+ * Quaternion rotation conversion under Y-axis reflection.
+ * q' = (-q.x, q.y, -q.z, q.w)
  */
 export function convertRotation(q: Quat): Quat {
-  return { x: q.x || 0, y: q.y || 0, z: q.z || 0, w: q.w || 0 };
+  return { x: -q.x || 0, y: q.y || 0, z: -q.z || 0, w: q.w || 0 };
 }
 
 /**
@@ -54,7 +65,7 @@ export function convertUV(u: number, v: number): { u: number; v: number } {
 }
 
 /**
- * Reverse triangle index winding order for a list of indices:
+ * Reverse triangle index winding order for a list of indices under single-axis reflection:
  * (i0, i1, i2) -> (i2, i1, i0)
  */
 export function reverseTriangleWinding<T extends Uint16Array | Uint32Array>(indices: T): T {
@@ -70,33 +81,33 @@ export function reverseTriangleWinding<T extends Uint16Array | Uint32Array>(indi
 }
 
 /**
- * Apply coordinate passthrough to a contiguous Float32Array of positions (3 floats per vertex).
+ * Apply Y-axis reflection to a contiguous Float32Array of positions (3 floats per vertex).
  */
 export function convertPositionsArray(positions: Float32Array): Float32Array {
   const result = new Float32Array(positions.length);
   for (let i = 0; i < positions.length; i += 3) {
     result[i] = positions[i] || 0;
-    result[i + 1] = positions[i + 1] || 0;
+    result[i + 1] = -positions[i + 1] || 0;
     result[i + 2] = positions[i + 2] || 0;
   }
   return result;
 }
 
 /**
- * Apply strict unit normalization to a contiguous Float32Array of normals (3 floats per vertex).
+ * Apply Y-axis reflection & strict unit normalization to a contiguous Float32Array of normals (3 floats per vertex).
  */
 export function convertNormalsArray(normals: Float32Array): Float32Array {
   const result = new Float32Array(normals.length);
   for (let i = 0; i < normals.length; i += 3) {
-    const x = normals[i];
-    const y = normals[i + 1];
-    const z = normals[i + 2];
+    const x = normals[i] || 0;
+    const y = -normals[i + 1] || 0;
+    const z = normals[i + 2] || 0;
 
     const len = Math.hypot(x, y, z);
     if (len > 1e-6) {
-      result[i] = (x / len) || 0;
-      result[i + 1] = (y / len) || 0;
-      result[i + 2] = (z / len) || 0;
+      result[i] = x / len;
+      result[i + 1] = y / len;
+      result[i + 2] = z / len;
     } else {
       // Fallback for zero or degenerate normal
       result[i] = 0;
@@ -108,23 +119,23 @@ export function convertNormalsArray(normals: Float32Array): Float32Array {
 }
 
 /**
- * Apply handedness clamp with unit normalization to a contiguous Float32Array of tangents (4 floats per vertex).
+ * Apply Y-axis & handedness flip with unit normalization to a contiguous Float32Array of tangents (4 floats per vertex).
  */
 export function convertTangentsArray(tangents: Float32Array): Float32Array {
   const result = new Float32Array(tangents.length);
   for (let i = 0; i < tangents.length; i += 4) {
-    const x = tangents[i];
-    const y = tangents[i + 1];
-    const z = tangents[i + 2];
+    const x = tangents[i] || 0;
+    const y = -tangents[i + 1] || 0;
+    const z = tangents[i + 2] || 0;
     const rawW = tangents[i + 3];
 
-    const w = rawW < 0 ? -1.0 : 1.0;
+    const w = rawW < 0 ? 1.0 : -1.0;
 
     const len = Math.hypot(x, y, z);
     if (len > 1e-6) {
-      result[i] = (x / len) || 0;
-      result[i + 1] = (y / len) || 0;
-      result[i + 2] = (z / len) || 0;
+      result[i] = x / len;
+      result[i + 1] = y / len;
+      result[i + 2] = z / len;
       result[i + 3] = w;
     } else {
       result[i] = 1.0;
