@@ -1,5 +1,5 @@
 // Orchestrate conversion from SourceScene + Assets to glTF Document / GLB / GLTF
-// Ultra memory-efficient (< 150MB RAM): shared accessors & static batch identity node binding
+// Reimplemented with 1:1 AssetRipper GlbLevelBuilder scene transform hierarchy & static batching inverse-transforms
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -12,6 +12,7 @@ import { createGltfMesh, createSharedVertexAccessors, SharedVertexAccessors } fr
 import { createGltfMaterial } from './materials.js';
 import { createTextureManager } from './textures.js';
 import { GuidIndex } from '../io/guidIndex.js';
+import { Matrix4, createIdentityMatrix, createTRSMatrix, multiplyMatrices, invertMatrix } from './matrix.js';
 
 export interface SourceBundle {
   scene: SourceScene;
@@ -44,14 +45,33 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     gltfMaterialMap.set(guid, gltfMat);
   }
 
-  // 2. Pre-create Shared Vertex Accessors for all Meshes (Strictly 1 allocation per unique mesh GUID)
-  const sharedAccessorsMap = new Map<string, SharedVertexAccessors>();
-  for (const [guid, sourceMesh] of bundle.meshes.entries()) {
-    const accessors = createSharedVertexAccessors(doc, buffer, sourceMesh);
-    sharedAccessorsMap.set(guid, accessors);
+  // 2. Compute Global Transforms & Inverse Transforms for all Nodes (matching AssetRipper GlbLevelBuilder)
+  const nodeGlobalTransformMap = new Map<number, Matrix4>();
+  const nodeGlobalInverseTransformMap = new Map<number, Matrix4>();
+
+  function computeNodeTransforms(fileID: number, parentGlobal: Matrix4) {
+    const node = bundle.scene.nodes.get(fileID);
+    if (!node) return;
+
+    const localMat = createTRSMatrix(node.localPosition, node.localRotation, node.localScale);
+    const globalMat = multiplyMatrices(parentGlobal, localMat);
+    const invGlobalMat = invertMatrix(globalMat) || createIdentityMatrix();
+
+    nodeGlobalTransformMap.set(fileID, globalMat);
+    nodeGlobalInverseTransformMap.set(fileID, invGlobalMat);
+
+    for (const childId of node.childFileIds) {
+      computeNodeTransforms(childId, globalMat);
+    }
   }
 
-  // 3. Convert Meshes per Renderer with Submesh Range Slicing
+  const identityMat = createIdentityMatrix();
+  for (const rootFileId of bundle.scene.rootNodeFileIds) {
+    computeNodeTransforms(rootFileId, identityMat);
+  }
+
+  // 3. Convert Meshes per Renderer with Static Batching Inverse Transforms
+  const sharedAccessorsMap = new Map<string, SharedVertexAccessors>();
   const meshVariantMap = new Map<string, Mesh>();
   const nodeMeshMap = new Map<number, Mesh>();
 
@@ -61,8 +81,21 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     }
 
     const sourceMesh = bundle.meshes.get(renderer.meshGuid)!;
-    const accessors = sharedAccessorsMap.get(renderer.meshGuid);
-    if (!accessors || !accessors.posAccessor) {
+    const isStaticBatch = !!(renderer.staticBatchInfo && renderer.staticBatchInfo.subMeshCount > 0);
+
+    // If static batched, compute inverse global transform for vertices
+    const posTransform = isStaticBatch ? nodeGlobalInverseTransformMap.get(renderer.nodeFileId) || null : null;
+
+    // Cache key includes meshGuid and posTransform hash for static meshes
+    const transformKey = isStaticBatch ? `_inv_${renderer.nodeFileId}` : '_dynamic';
+
+    let accessors = sharedAccessorsMap.get(`${renderer.meshGuid}${transformKey}`);
+    if (!accessors) {
+      accessors = createSharedVertexAccessors(doc, buffer, sourceMesh, posTransform);
+      sharedAccessorsMap.set(`${renderer.meshGuid}${transformKey}`, accessors);
+    }
+
+    if (!accessors.posAccessor) {
       continue;
     }
 
@@ -80,7 +113,7 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     const firstSub = renderer.staticBatchInfo?.firstSubMesh ?? 0;
     const subCount = renderer.staticBatchInfo?.subMeshCount ?? 0;
 
-    const variantKey = `${renderer.meshGuid}:sub_${firstSub}_${subCount}:${matGuidsKeyParts.join('_')}`;
+    const variantKey = `${renderer.meshGuid}:${transformKey}:sub_${firstSub}_${subCount}:${matGuidsKeyParts.join('_')}`;
 
     let gltfMesh = meshVariantMap.get(variantKey);
     if (!gltfMesh) {
@@ -91,32 +124,13 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     nodeMeshMap.set(renderer.nodeFileId, gltfMesh);
   }
 
-  // 4. Convert Scene Hierarchy
-  // For static batch renderers (whose combined mesh vertices are already in world space),
-  // override their node transform to identity so they place at exact world coordinates.
-  const staticNodeFileIds = new Set<number>();
-  for (const r of bundle.scene.renderers) {
-    if (r.staticBatchInfo && r.staticBatchInfo.subMeshCount > 0) {
-      staticNodeFileIds.add(r.nodeFileId);
-    }
-  }
-
-  const { scene, nodeMap } = createGltfSceneGraph(
+  // 4. Convert Scene Hierarchy (preserving 100% of node local transforms and parent-child edges)
+  createGltfSceneGraph(
     doc,
     bundle.scene,
     (nodeFileId) => nodeMeshMap.get(nodeFileId) || null,
     { rotateYUp: options?.rotateYUp }
   );
-
-  for (const nodeFileId of staticNodeFileIds) {
-    const node = nodeMap.get(nodeFileId);
-    if (node) {
-      // Clear local transforms for static batch nodes to prevent double-transforming world vertices
-      node.setTranslation([0, 0, 0]);
-      node.setRotation([0, 0, 0, 1]);
-      node.setScale([1, 1, 1]);
-    }
-  }
 
   return doc;
 }
