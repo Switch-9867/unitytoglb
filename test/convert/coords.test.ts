@@ -26,8 +26,8 @@ describe('Coordinate Conversion Math', () => {
     expect(convertTangent({ x: 0, y: 1, z: -0.5, w: -1 })).toEqual({ x: 0, y: 1, z: 0.5, w: 1 });
   });
 
-  it('converts rotation quaternion by negating Z', () => {
-    expect(convertRotation({ x: 0, y: 0, z: 0.7071, w: 0.7071 })).toEqual({ x: 0, y: 0, z: -0.7071, w: 0.7071 });
+  it('converts rotation quaternion under Z reflection', () => {
+    expect(convertRotation({ x: 0.1, y: 0.2, z: 0.3, w: 0.9 })).toEqual({ x: -0.1, y: -0.2, z: 0.3, w: 0.9 });
   });
 
   it('preserves scale unchanged', () => {

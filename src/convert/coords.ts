@@ -29,11 +29,11 @@ export function convertTangent(t: Vec4): Vec4 {
 }
 
 /**
- * Quaternion rotation conversion: negate Z component.
- * q' = (q.x, q.y, -q.z, q.w)
+ * Quaternion rotation conversion under Z-axis reflection (left-handed to right-handed).
+ * q' = (-q.x, -q.y, q.z, q.w)
  */
 export function convertRotation(q: Quat): Quat {
-  return { x: q.x, y: q.y, z: -q.z, w: q.w };
+  return { x: -q.x, y: -q.y, z: q.z, w: q.w };
 }
 
 /**
