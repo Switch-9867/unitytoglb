@@ -3,8 +3,8 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { Document, NodeIO } from '@gltf-transform/core';
-import { KHRTextureTransform, KHRLightsPunctual, KHRMeshQuantization } from '@gltf-transform/extensions';
-import { prune, dedup, weld, quantize } from '@gltf-transform/functions';
+import { KHRTextureTransform, KHRLightsPunctual } from '@gltf-transform/extensions';
+import { prune, dedup } from '@gltf-transform/functions';
 import { SourceScene, SourceMesh, SourceMaterial } from '../model/types.js';
 import { createGltfSceneGraph } from './hierarchy.js';
 import { createGltfMesh } from './geometry.js';
@@ -77,11 +77,10 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
 }
 
 export async function processDocumentOptimizations(doc: Document): Promise<void> {
+  // Only deduplicate materials/textures and prune unused nodes. NEVER weld or quantize vertices.
   await doc.transform(
-    weld(),
-    dedup(),
-    prune(),
-    quantize()
+    dedup({ propertyTypes: ['material', 'texture'] }),
+    prune()
   );
 }
 
@@ -91,7 +90,6 @@ export async function convertSourceBundleToGLB(bundle: SourceBundle, options?: C
     await processDocumentOptimizations(doc);
   }
   const extensions = [KHRTextureTransform, KHRLightsPunctual];
-  if (options?.optimize) extensions.push(KHRMeshQuantization as any);
 
   const io = new NodeIO().registerExtensions(extensions as any);
   const glbBuffer = await io.writeBinary(doc);
@@ -134,7 +132,6 @@ export async function exportSourceBundleToGltfFiles(
   }
 
   const extensions = [KHRTextureTransform, KHRLightsPunctual];
-  if (options?.optimize) extensions.push(KHRMeshQuantization as any);
 
   const io = new NodeIO().registerExtensions(extensions as any);
   await io.write(outputPath, doc);
