@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 // CLI Entry point for scene-to-gltf Unity Export Converter
+// Supports direct .unity scene files, export root directories, or project subfolders
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -80,11 +81,11 @@ function printHelp() {
 scene-to-gltf — Convert AssetRipper Unity exports into glTF 2.0 / GLB
 
 Usage:
-  scene-to-gltf [target-path] [options]
+  scene-to-gltf [scene-file.unity | target-dir] [options]
 
 Options:
-  -o, --output <path>         Output GLB/glTF file path (default: <SceneName>.gltf or <SceneName>.glb)
-  -s, --scene <name>          Specific scene file to convert (default: ORGANIZM.unity)
+  -o, --output <path>         Output GLB/glTF file path (default: <SceneName>.glb)
+  -s, --scene <name>          Specific scene file to convert if directory is passed
   -m, --max-renderers <num>   Limit number of renderers to convert (optional preview mode)
   -f, --format <glb|gltf>     Output format: glb (single binary) or gltf (JSON + external files)
   --skip-textures, -nt        Skip loading and embedding textures completely (super fast & lightweight)
@@ -96,15 +97,15 @@ Options:
   -h, --help                  Show this help message
 
 Examples:
-  # Export full scene without any textures (lightweight geometry & material colors)
-  scene-to-gltf . --skip-textures -o ORGANIZM_no_textures.glb
+  # Point directly to a .unity scene file
+  scene-to-gltf /path/to/ORGANIZM.unity --skip-textures -o ORGANIZM.glb
 
-  # Export full scene oriented +Y Up
-  scene-to-gltf . --skip-textures --rotate-y-up -o ORGANIZM_yup.glb
+  # Point to project root directory
+  scene-to-gltf . --skip-textures -o ORGANIZM.glb
 `);
 }
 
-async function main() {
+export async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   if (args.help) {
@@ -112,88 +113,104 @@ async function main() {
     process.exit(0);
   }
 
-  const log = (...msg: any[]) => {
-    if (!args.quiet) console.log(...msg);
+  const log = (msg: string) => {
+    if (!args.quiet) {
+      console.log(msg);
+    }
   };
 
   log('=== Unity Export to glTF 2.0 / GLB Converter ===');
 
-  const exportRoot = await findExportRoot(args.targetPath);
-  log(`Root Directory:   ${exportRoot.exportRootDir}`);
-  log(`Assets Directory: ${exportRoot.assetsDir}`);
+  try {
+    const rootInfo = await findExportRoot(args.targetPath);
+    const sceneFilePath = findSceneFile(rootInfo, args.sceneName);
 
-  const sceneFileName = args.sceneName || 'ORGANIZM.unity';
-  const scenePath = findSceneFile(exportRoot, sceneFileName);
-  log(`Scene File:       ${path.basename(scenePath)}`);
+    const sceneBasename = path.basename(sceneFilePath, '.unity');
+    const outFormat = args.format || (args.outputPath?.endsWith('.gltf') ? 'gltf' : 'glb');
+    const finalOutputPath = path.resolve(
+      args.outputPath || `${sceneBasename}.${outFormat}`
+    );
 
-  log('\n[1] Parsing Scene Hierarchy...');
-  const sceneContent = fs.readFileSync(scenePath, 'utf8');
-  let scene = parseSourceScene(sceneContent, path.basename(sceneFileName, '.unity'));
+    log(`Root Directory:   ${rootInfo.exportRootDir}`);
+    log(`Assets Directory: ${rootInfo.assetsDir}`);
+    log(`Scene File:       ${sceneFilePath}`);
 
-  if (args.maxRenderers && args.maxRenderers > 0) {
-    log(`[Info] Capping renderers to max ${args.maxRenderers}`);
-    scene = {
-      ...scene,
-      renderers: scene.renderers.slice(0, args.maxRenderers),
+    // [1] Parse Scene
+    log('\n[1] Parsing Scene Hierarchy...');
+    const sceneYamlContent = fs.readFileSync(sceneFilePath, 'utf-8');
+    const scene = parseSourceScene(sceneYamlContent, sceneBasename);
+
+    log(`    GameObjects: ${scene.nodes.size}`);
+    log(`    Renderers:   ${scene.renderers.length}`);
+    log(`    Cameras:     ${scene.cameras.length}`);
+    log(`    Lights:      ${scene.lights.length}`);
+
+    // If max renderers option specified, limit renderer list for quick previewing
+    if (args.maxRenderers && args.maxRenderers > 0) {
+      scene.renderers = scene.renderers.slice(0, args.maxRenderers);
+      log(`    [Preview Mode] Limited to first ${scene.renderers.length} renderers`);
+    }
+
+    // [2] Load Assets
+    log('\n[2] Loading Referenced Asset Data...');
+    const convertOptions: ConvertOptions = {
+      optimize: args.optimize,
+      skipTextures: args.skipTextures,
+      separateTextures: args.separateTextures,
+      texturesDir: args.texturesDir,
+      rotateYUp: args.rotateYUp,
     };
+
+    const assets = await loadAssetsForScene(scene, rootInfo.guidIndex);
+
+    log(`    Loaded Meshes:    ${assets.meshes.size}`);
+    log(`    Loaded Materials: ${assets.materials.size}`);
+    if (args.skipTextures) {
+      log('    [Option] Skipping texture loading (--skip-textures active)');
+    }
+
+    // [3] Convert & Write glTF / GLB
+    log('\n[3] Converting to glTF 2.0...');
+
+    const bundle = {
+      scene,
+      meshes: assets.meshes,
+      materials: assets.materials,
+      guidIndex: rootInfo.guidIndex,
+    };
+
+    const startTime = Date.now();
+
+    if (outFormat === 'gltf') {
+      log(`    Writing glTF JSON to ${finalOutputPath}...`);
+      await exportSourceBundleToGltfFiles(bundle, finalOutputPath, convertOptions);
+    } else {
+      log('    Packing single binary GLB buffer...');
+      const glbBuffer = await convertSourceBundleToGLB(bundle, convertOptions);
+      fs.writeFileSync(finalOutputPath, glbBuffer);
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    log('\n===============================================');
+    log(`SUCCESS: Export completed in ${elapsed}s!`);
+    log(`Output File: ${finalOutputPath}`);
+    log('===============================================\n');
+  } catch (err: any) {
+    console.error(`\n[ERROR] ${err.message}`);
+    if (process.env.DEBUG) {
+      console.error(err.stack);
+    }
+    process.exit(1);
   }
-
-  log(`    GameObjects: ${scene.nodes.size}`);
-  log(`    Renderers:   ${scene.renderers.length}`);
-  log(`    Cameras:     ${scene.cameras.length}`);
-  log(`    Lights:      ${scene.lights.length}`);
-
-  log('\n[2] Loading Referenced Asset Data...');
-  const bundle = loadAssetsForScene(scene, exportRoot.guidIndex);
-  log(`    Loaded Meshes:    ${bundle.report.loadedMeshes}`);
-  log(`    Loaded Materials: ${bundle.report.loadedMaterials}`);
-  if (args.skipTextures) {
-    log(`    [Option] Skipping texture loading (--skip-textures active)`);
-  }
-
-  const convertOpts: ConvertOptions = {
-    optimize: args.optimize,
-    skipTextures: args.skipTextures,
-    separateTextures: args.separateTextures,
-    texturesDir: args.texturesDir || 'textures',
-    rotateYUp: args.rotateYUp,
-  };
-
-  const isGltfFormat = args.format === 'gltf' || (args.separateTextures && !args.skipTextures);
-  const defaultExt = isGltfFormat ? '.gltf' : '.glb';
-  const outputPath = args.outputPath || path.join(exportRoot.exportRootDir, `${scene.name}${defaultExt}`);
-
-  log('\n[3] Converting to glTF 2.0...');
-  if (args.optimize) {
-    log('    Applying Optimization Pipeline...');
-  }
-  if (args.rotateYUp) {
-    log('    [Option] Applying SceneRoot +90 deg X rotation for +Y Up orientation');
-  }
-
-  const startConvert = Date.now();
-
-  if (isGltfFormat) {
-    log(`    Writing glTF JSON...`);
-    await exportSourceBundleToGltfFiles(bundle, outputPath, convertOpts);
-  } else {
-    log('    Packing single binary GLB buffer...');
-    const glbBytes = await convertSourceBundleToGLB(bundle, convertOpts);
-    fs.writeFileSync(outputPath, glbBytes);
-  }
-
-  const elapsedSec = ((Date.now() - startConvert) / 1000).toFixed(2);
-
-  log(`\n===============================================`);
-  log(`SUCCESS: Export completed in ${elapsedSec}s!`);
-  log(`Output File: ${outputPath}`);
-  if (args.separateTextures && !args.skipTextures) {
-    log(`Textures Folder: ${path.join(path.dirname(outputPath), convertOpts.texturesDir!)}`);
-  }
-  log(`===============================================`);
 }
 
-main().catch((err) => {
-  console.error('\nConversion Error:', err);
-  process.exit(1);
-});
+// Auto-run if executed directly as main script
+const isDirectRun =
+  process.argv[1] &&
+  (process.argv[1].endsWith('cli/index.js') ||
+    process.argv[1].endsWith('scene-to-gltf') ||
+    process.argv[1].endsWith('scene-to-gltf.cjs'));
+
+if (isDirectRun) {
+  main();
+}

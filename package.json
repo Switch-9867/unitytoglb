@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "bundle": "npx esbuild src/cli/index.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/bundle.js",
     "test": "vitest run",
     "test:memory": "vitest run test/convert/memory_benchmark.test.ts",
     "test:watch": "vitest"
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "esbuild": "^0.23.0",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
   }
