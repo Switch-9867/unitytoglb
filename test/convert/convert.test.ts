@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { NodeIO } from '@gltf-transform/core';
+import { KHRTextureTransform, KHRLightsPunctual } from '@gltf-transform/extensions';
 import { parseSourceScene } from '../../src/parse/scene.js';
 import { parseSourceMesh } from '../../src/parse/mesh.js';
 import { parseSourceMaterial } from '../../src/parse/material.js';
@@ -75,7 +76,7 @@ Material:
     expect(magic).toBe(0x46546c67);
 
     // Validate GLB deserialization back into glTF Document using NodeIO
-    const io = new NodeIO();
+    const io = new NodeIO().registerExtensions([KHRTextureTransform, KHRLightsPunctual]);
     const readDoc = await io.readBinary(glbBytes);
     expect(readDoc.getRoot().listScenes()).toHaveLength(1);
     expect(readDoc.getRoot().listNodes()).toHaveLength(3);

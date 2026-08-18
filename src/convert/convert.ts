@@ -3,7 +3,7 @@
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { Document, NodeIO, Mesh, Material } from '@gltf-transform/core';
+import { Document, NodeIO, Mesh, Material, PropertyType } from '@gltf-transform/core';
 import { KHRTextureTransform, KHRLightsPunctual } from '@gltf-transform/extensions';
 import { prune, dedup } from '@gltf-transform/functions';
 import { SourceScene, SourceMesh, SourceMaterial } from '../model/types.js';
@@ -120,9 +120,9 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
 }
 
 export async function processDocumentOptimizations(doc: Document): Promise<void> {
-  // Only deduplicate materials/textures and prune unused nodes. NEVER weld or quantize vertices.
+  // Deduplicate materials/textures and prune unused elements. NEVER weld or quantize vertices.
   await doc.transform(
-    dedup({ propertyTypes: ['material', 'texture'] }),
+    dedup({ propertyTypes: [PropertyType.MATERIAL, PropertyType.TEXTURE] }),
     prune()
   );
 }

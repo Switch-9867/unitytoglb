@@ -92,7 +92,7 @@ Options:
   --separate-textures, -st   Extract textures to separate files instead of embedding in GLB
   --textures-dir, -td <dir>   Directory name/path for extracted textures (default: textures)
   --rotate-y-up, -ry          Apply +90 deg X master root node rotation to orient scene +Y Up
-  -O, --optimize              Apply geometry welding, accessor deduplication, and mesh quantization
+  -O, --optimize              Deduplicate materials/textures and prune unused glTF elements
   -q, --quiet                 Suppress non-error logging
   -h, --help                  Show this help message
 
@@ -162,15 +162,35 @@ export async function main() {
     };
 
     const assets = await loadAssetsForScene(scene, rootInfo.guidIndex);
+    const report = assets.report;
 
-    log(`    Loaded Meshes:    ${assets.meshes.size}`);
-    log(`    Loaded Materials: ${assets.materials.size}`);
+    log(`    Loaded Meshes:    ${assets.meshes.size} / ${report.uniqueMeshGuids} referenced`);
+    log(`    Loaded Materials: ${assets.materials.size} / ${report.uniqueMaterialGuids} referenced`);
     if (args.skipTextures) {
       log('    [Option] Skipping texture loading (--skip-textures active)');
     }
 
+    if (report.missingMeshGuids.length > 0) {
+      log(`    [Warning] Missing ${report.missingMeshGuids.length} referenced mesh asset(s)`);
+      if (!args.quiet && report.missingMeshGuids.length <= 5) {
+        report.missingMeshGuids.forEach((g) => log(`      - Mesh GUID: ${g}`));
+      }
+    }
+    if (report.missingMaterialGuids.length > 0) {
+      log(`    [Warning] Missing ${report.missingMaterialGuids.length} referenced material asset(s)`);
+      if (!args.quiet && report.missingMaterialGuids.length <= 5) {
+        report.missingMaterialGuids.forEach((g) => log(`      - Material GUID: ${g}`));
+      }
+    }
+
     // [3] Convert & Write glTF / GLB
     log('\n[3] Converting to glTF 2.0...');
+    if (args.optimize) {
+      log('    [Option] Optimizing glTF document (deduplicating materials/textures & pruning unused elements)...');
+    }
+    if (args.rotateYUp) {
+      log('    [Option] Applying root container orientation (+Y Up)...');
+    }
 
     const bundle = {
       scene,
@@ -180,20 +200,27 @@ export async function main() {
     };
 
     const startTime = Date.now();
+    let outputFileSize = 0;
 
     if (outFormat === 'gltf') {
-      log(`    Writing glTF JSON to ${finalOutputPath}...`);
+      log(`    Writing glTF JSON & assets to ${finalOutputPath}...`);
       await exportSourceBundleToGltfFiles(bundle, finalOutputPath, convertOptions);
+      if (fs.existsSync(finalOutputPath)) {
+        outputFileSize = fs.statSync(finalOutputPath).size;
+      }
     } else {
       log('    Packing single binary GLB buffer...');
       const glbBuffer = await convertSourceBundleToGLB(bundle, convertOptions);
       fs.writeFileSync(finalOutputPath, glbBuffer);
+      outputFileSize = glbBuffer.byteLength;
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    const sizeMB = (outputFileSize / (1024 * 1024)).toFixed(2);
+
     log('\n===============================================');
     log(`SUCCESS: Export completed in ${elapsed}s!`);
-    log(`Output File: ${finalOutputPath}`);
+    log(`Output File: ${finalOutputPath} (${sizeMB} MB)`);
     log('===============================================\n');
   } catch (err: any) {
     console.error(`\n[ERROR] ${err.message}`);

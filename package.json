@@ -3,16 +3,25 @@
   "version": "0.1.0",
   "description": "Convert AssetRipper Unity scene export into glTF 2.0 / GLB",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "docs"
+  ],
   "bin": {
     "scene-to-gltf": "dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
     "bundle": "npx esbuild src/cli/index.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/bundle.js",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:memory": "vitest run test/convert/memory_benchmark.test.ts",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "validate": "node dist/scripts/validate_gltf.js",
+    "benchmark:memory": "node dist/scripts/verify_memory.js"
   },
   "keywords": [
     "unity",

@@ -145,3 +145,37 @@ export function transformVector3D(m: Matrix4, v: Vec3): Vec3 {
     z: m[2] * x + m[6] * y + m[10] * z,
   };
 }
+
+/**
+ * Transform a normal vector by the inverse-transpose (cofactor) of the upper-left 3x3 block of matrix m.
+ * This mathematically guarantees orthogonality and surface normal accuracy under non-uniform scaling.
+ */
+export function transformNormal3D(m: Matrix4, n: Vec3): Vec3 {
+  const a00 = m[0], a10 = m[1], a20 = m[2];
+  const a01 = m[4], a11 = m[5], a21 = m[6];
+  const a02 = m[8], a12 = m[9], a22 = m[10];
+
+  // 3x3 Cofactor matrix (adjoint transpose)
+  const c00 = a11 * a22 - a12 * a21;
+  const c01 = a12 * a20 - a10 * a22;
+  const c02 = a10 * a21 - a11 * a20;
+
+  const c10 = a02 * a21 - a01 * a22;
+  const c11 = a00 * a22 - a02 * a20;
+  const c12 = a01 * a20 - a00 * a21;
+
+  const c20 = a01 * a12 - a02 * a11;
+  const c21 = a02 * a10 - a00 * a12;
+  const c22 = a00 * a11 - a01 * a10;
+
+  const nx = n.x, ny = n.y, nz = n.z;
+  const x = c00 * nx + c01 * ny + c02 * nz;
+  const y = c10 * nx + c11 * ny + c12 * nz;
+  const z = c20 * nx + c21 * ny + c22 * nz;
+
+  const len = Math.hypot(x, y, z);
+  if (len > 1e-6) {
+    return { x: x / len, y: y / len, z: z / len };
+  }
+  return { x: 0, y: 1, z: 0 };
+}

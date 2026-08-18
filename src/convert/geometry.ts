@@ -11,7 +11,7 @@ import {
   convertUVsArray,
   reverseTriangleWinding,
 } from './coords.js';
-import { Matrix4, transformPoint3D, transformVector3D } from './matrix.js';
+import { Matrix4, transformPoint3D, transformVector3D, transformNormal3D } from './matrix.js';
 
 export interface MeshSubmeshRange {
   firstSubMesh?: number;
@@ -102,21 +102,20 @@ export function createGltfMesh(
     const primitive = doc.createPrimitive();
     primitive.setAttribute('POSITION', posAccessor);
 
-    // 2. NORMAL slice (transformed by 3x3 rotation of posTransform = globalInverseTransform)
+    // 2. NORMAL slice (transformed by 3x3 inverse-transpose cofactor of posTransform = globalInverseTransform)
     if (rawNormalsAll && rawNormalsAll.length >= (firstV + sliceVertexCount) * 3) {
       let normSlice = rawNormalsAll.subarray(firstV * 3, (firstV + sliceVertexCount) * 3);
       if (posTransform) {
         const transformedNorm = new Float32Array(normSlice.length);
         for (let i = 0; i < normSlice.length; i += 3) {
-          const vec = transformVector3D(posTransform, {
+          const vec = transformNormal3D(posTransform, {
             x: normSlice[i],
             y: normSlice[i + 1],
             z: normSlice[i + 2],
           });
-          const len = Math.hypot(vec.x, vec.y, vec.z) || 1.0;
-          transformedNorm[i] = vec.x / len;
-          transformedNorm[i + 1] = vec.y / len;
-          transformedNorm[i + 2] = vec.z / len;
+          transformedNorm[i] = vec.x;
+          transformedNorm[i + 1] = vec.y;
+          transformedNorm[i + 2] = vec.z;
         }
         normSlice = transformedNorm;
       }
@@ -174,11 +173,12 @@ export function createGltfMesh(
       primitive.setAttribute('TEXCOORD_0', uv0Accessor);
     }
 
-    // 5. INDICES (re-indexed relative to firstV)
+    // 5. INDICES (re-indexed relative to firstV with boundary clamping)
     const reindexed = new Uint32Array(rawIndices.length);
     for (let i = 0; i < rawIndices.length; i++) {
       const idx = rawIndices[i];
-      reindexed[i] = idx >= firstV ? idx - firstV : idx;
+      const relIdx = idx >= firstV ? idx - firstV : idx;
+      reindexed[i] = Math.max(0, Math.min(relIdx, sliceVertexCount - 1));
     }
 
     const reversedIndices = reverseTriangleWinding(reindexed);

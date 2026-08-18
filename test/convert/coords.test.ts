@@ -11,6 +11,7 @@ import {
   reverseTriangleWinding,
   computeMinMax3D,
 } from '../../src/convert/coords.js';
+import { createTRSMatrix, transformNormal3D } from '../../src/convert/matrix.js';
 
 describe('Coordinate Conversion Math (Unity to glTF Z-Reflection)', () => {
   it('flips Z axis for position coordinates', () => {
@@ -65,5 +66,15 @@ describe('Coordinate Conversion Math (Unity to glTF Z-Reflection)', () => {
     const { min, max } = computeMinMax3D(positions);
     expect(min).toEqual([-4, -1, -3]);
     expect(max).toEqual([1, 5, 6]);
+  });
+
+  it('transforms normal vectors accurately under non-uniform scaling via 3x3 cofactor matrix', () => {
+    // Non-uniform scale: scale X by 2, Y by 1, Z by 1
+    const mat = createTRSMatrix({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0, w: 1 }, { x: 2, y: 1, z: 1 });
+    // Surface with diagonal tangent (1, 1, 0) -> normal (1, -1, 0)
+    const norm = transformNormal3D(mat, { x: 1, y: -1, z: 0 });
+    // Transformed normal x / y ratio should be 1 / -2
+    expect(norm.x / norm.y).toBeCloseTo(-0.5);
+    expect(Math.hypot(norm.x, norm.y, norm.z)).toBeCloseTo(1.0);
   });
 });

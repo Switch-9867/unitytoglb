@@ -46,7 +46,7 @@ export function loadAssetsForScene(scene: SourceScene, guidIndex: GuidIndex): So
     }
 
     const entry = guidIndex.get(guid);
-    if (entry && fs.existsSync(entry.assetPath)) {
+    if (entry && fs.existsSync(entry.assetPath) && fs.statSync(entry.assetPath).isFile()) {
       try {
         const content = fs.readFileSync(entry.assetPath, 'utf8');
         const mesh = parseSourceMesh(content, guid);
@@ -62,7 +62,7 @@ export function loadAssetsForScene(scene: SourceScene, guidIndex: GuidIndex): So
   const missingMaterialGuids: string[] = [];
   for (const guid of materialGuids) {
     const entry = guidIndex.get(guid);
-    if (entry && fs.existsSync(entry.assetPath)) {
+    if (entry && fs.existsSync(entry.assetPath) && fs.statSync(entry.assetPath).isFile()) {
       try {
         const content = fs.readFileSync(entry.assetPath, 'utf8');
         const mat = parseSourceMaterial(content, guid);

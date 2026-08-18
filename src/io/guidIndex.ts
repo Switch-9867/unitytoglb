@@ -97,11 +97,13 @@ export async function buildGuidIndexFromDir(rootDir: string): Promise<GuidIndex>
           const guid = parseGuidFromMeta(content);
           if (guid) {
             const assetPath = fullPath.slice(0, -5);
-            index.addEntry({
-              guid,
-              assetPath,
-              metaPath: fullPath,
-            });
+            if (fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) {
+              index.addEntry({
+                guid,
+                assetPath,
+                metaPath: fullPath,
+              });
+            }
           }
         } catch {
           // ignore unreadable files

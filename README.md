@@ -46,7 +46,7 @@ node dist/cli/index.js . --skip-textures -o Scene_no_textures.glb
 node dist/cli/index.js . --separate-textures --textures-dir textures -o Scene.gltf
 ```
 
-### 4. Apply Geometry Optimization Pass (Weld Vertices & Quantization)
+### 4. Apply Document Optimization Pass (Deduplicate & Prune)
 ```bash
 node dist/cli/index.js . -O -o Scene_optimized.glb
 ```
@@ -64,20 +64,93 @@ node dist/cli/index.js . -O -o Scene_optimized.glb
 | `-nt` | `--skip-textures`, `--no-textures` | Skip loading and embedding textures completely | `false` |
 | `-st` | `--separate-textures` | Extract textures to separate image files | `false` |
 | `-td` | `--textures-dir <dir>` | Folder path for extracted texture files | `textures` |
-| `-O` | `--optimize` | Apply vertex welding, accessor deduplication & quantization | `false` |
+| `-ry` | `--rotate-y-up` | Apply root node container orientation (+Y Up) | `false` |
+| `-O` | `--optimize` | Deduplicate materials/textures and prune unused glTF elements | `false` |
 | `-q` | `--quiet` | Suppress non-error output | `false` |
 | `-h` | `--help` | Display CLI help menu | — |
 
 ---
 
-## Running Tests
+## Project Structure
+
+```
+.
+├── docs/                     # Architecture guides & specifications
+│   ├── architecture/         # Coordinate math, glTF mapping, and binary formats
+│   ├── specifications/       # Implementation plans, loss policies, and test matrices
+│   └── README.md             # Documentation master index
+├── src/
+│   ├── index.ts              # Programmatic TypeScript library API entry point
+│   ├── cli/
+│   │   └── index.ts          # CLI runner & argument parsing
+│   ├── convert/              # glTF conversion, scene graphs, geometry, materials, math
+│   ├── io/                   # Asset discovery, export root resolution, and GUID indexing
+│   ├── model/                # Clean TypeScript source data interfaces
+│   ├── parse/                # Unity YAML, binary mesh decoders, and builtin primitives
+│   └── scripts/              # Diagnostics, benchmarks, and validation tools
+├── test/                     # Vitest unit & integration test suites
+│   ├── convert/              # Geometry, materials, cameras, lights, memory benchmarks
+│   ├── fixtures/             # Sample Unity scene test fixtures
+│   └── parse/                # YAML and binary mesh decoder tests
+├── dist/                     # Compiled JavaScript output (tsc) & standalone bundle
+└── exports/                  # Default output directory for generated 3D assets
+```
+
+---
+
+## Programmatic Library Usage
+
+`scene-to-gltf` can also be used as a TypeScript/Node.js library:
+
+```typescript
+import {
+  findExportRoot,
+  findSceneFile,
+  parseSourceScene,
+  loadAssetsForScene,
+  convertSourceBundleToGLB,
+} from 'scene-to-gltf';
+import * as fs from 'node:fs';
+
+// 1. Locate export directory and scene file
+const rootInfo = await findExportRoot('./AssetRipper_export');
+const scenePath = findSceneFile(rootInfo, 'SampleScene.unity');
+
+// 2. Parse Unity YAML scene & load referenced assets
+const sceneContent = fs.readFileSync(scenePath, 'utf8');
+const scene = parseSourceScene(sceneContent, 'SampleScene');
+const bundle = loadAssetsForScene(scene, rootInfo.guidIndex);
+
+// 3. Convert to GLB binary buffer
+const glbBytes = await convertSourceBundleToGLB(bundle, { optimize: true });
+fs.writeFileSync('Output.glb', glbBytes);
+```
+
+---
+
+## Documentation & Deep-Dive Specs
+
+For in-depth architectural and mathematical references, refer to the [**`docs/`**](file:///home/switch/Desktop/ORGANISM/docs/README.md) directory:
+
+- [**Coordinate System Conversion Math**](file:///home/switch/Desktop/ORGANISM/docs/architecture/COORDINATE_SYSTEM.md): Z-reflection, winding flip, and quaternion formulas.
+- [**glTF 2.0 Mapping Matrix**](file:///home/switch/Desktop/ORGANISM/docs/architecture/GLTF_MAPPING.md): Component mapping reference tables.
+- [**Binary Mesh Format Specification**](file:///home/switch/Desktop/ORGANISM/docs/architecture/SOURCE_FORMAT.md): Multi-stream vertex channel structures & half-float decoding.
+- [**Loss & Approximation Policy**](file:///home/switch/Desktop/ORGANISM/docs/specifications/LOSS_AND_WARNINGS.md): Classification taxonomy for unsupported or approximated features.
+- [**Maintainer & Architecture Guide**](file:///home/switch/Desktop/ORGANISM/docs/architecture/LLM_HANDOFF.md): Memory optimization rules and pipeline walkthrough.
+
+---
+
+## Running Tests & Diagnostics
 
 ```bash
-# Run unit & integration tests
+# Run full unit & integration test suite
 npm test
 
-# Run memory usage verification benchmark
+# Run memory benchmark (< 250 MB heap verification)
 npm run test:memory
+
+# Validate glTF schema against Blender 5.x requirements
+npm run validate
 ```
 
 ---

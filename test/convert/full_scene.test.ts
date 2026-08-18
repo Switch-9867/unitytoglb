@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import { NodeIO } from '@gltf-transform/core';
+import { KHRTextureTransform, KHRLightsPunctual } from '@gltf-transform/extensions';
 import { parseSourceScene } from '../../src/parse/scene.js';
 import { findExportRoot, findSceneFile } from '../../src/io/exportRoot.js';
 import { loadAssetsForScene } from '../../src/io/assetLoader.js';
@@ -68,7 +69,7 @@ describe('Milestone 4: Full Static Scene Conversion (Sampled Subtree)', () => {
     expect(magic).toBe(0x46546c67);
 
     // Validate GLB deserialization with NodeIO
-    const io = new NodeIO();
+    const io = new NodeIO().registerExtensions([KHRTextureTransform, KHRLightsPunctual]);
     const readDoc = await io.readBinary(glbBytes);
     expect(readDoc.getRoot().listScenes()).toHaveLength(1);
     expect(readDoc.getRoot().listNodes().length).toBeGreaterThan(10);
