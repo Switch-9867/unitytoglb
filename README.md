@@ -155,6 +155,12 @@ npm run validate
 
 ---
 
+## AI & Generation Disclaimer
+
+This codebase was developed with the assistance of AI coding assistants. While the architecture, coordinate mathematics, binary decoders, and conversion pipelines have been designed, tested, and validated against standard glTF 2.0 specifications and integration benchmarks, users are advised to test and verify converted assets for their specific production pipelines and 3D engine requirements.
+
+---
+
 ## License
 
 ISC
