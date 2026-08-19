@@ -1,5 +1,11 @@
 # scene-to-gltf — Unity Export to glTF 2.0 / GLB Converter
 
+> [!WARNING]
+> ### ⚠️ AI & Project Disclaimer
+> - **AI-Assisted Development**: This codebase was developed with the assistance of AI coding assistants. While the architecture, coordinate mathematics, binary decoders, and conversion pipelines have been designed, tested, and validated against standard glTF 2.0 specifications and integration benchmarks, users are advised to test and verify converted assets for their specific production pipelines and 3D engine requirements.
+> - **No Support**: No maintenance, updates, or support are provided for this project.
+> - **Skill Representation**: The purpose of this project being uploaded is not representative of my personal skills or abilities.
+
 A high-performance TypeScript CLI tool and library for converting AssetRipper Unity project scene exports into standard **glTF 2.0 (.gltf)** and **GLB (.glb)** binary 3D assets.
 
 ---
@@ -152,12 +158,6 @@ npm run test:memory
 # Validate glTF schema against Blender 5.x requirements
 npm run validate
 ```
-
----
-
-## AI & Generation Disclaimer
-
-This codebase was developed with the assistance of AI coding assistants. While the architecture, coordinate mathematics, binary decoders, and conversion pipelines have been designed, tested, and validated against standard glTF 2.0 specifications and integration benchmarks, users are advised to test and verify converted assets for their specific production pipelines and 3D engine requirements.
 
 ---
 
