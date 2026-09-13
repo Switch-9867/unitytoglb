@@ -19,7 +19,13 @@ export function createGltfMaterial(
   }
 
   // Base color factor
-  const color = sourceMat.colors['_Color'] || sourceMat.colors['_BaseColor'] || { r: 1, g: 1, b: 1, a: 1 };
+  const color =
+    sourceMat.colors['_Color'] ||
+    sourceMat.colors['_BaseColor'] ||
+    sourceMat.colors['_MainColor'] ||
+    sourceMat.colors['_TintColor'] ||
+    sourceMat.colors['_Color0'] ||
+    { r: 1, g: 1, b: 1, a: 1 };
   mat.setBaseColorFactor([color.r, color.g, color.b, color.a]);
 
   // Metallic & Roughness (Roughness = 1 - Glossiness / Smoothness)
@@ -48,15 +54,21 @@ export function createGltfMaterial(
   }
 
   // Emission
-  const emissionColor = sourceMat.colors['_EmissionColor'];
+  const emissionColor =
+    sourceMat.colors['_EmissionColor'] ||
+    sourceMat.colors['_EmisColor'] ||
+    sourceMat.colors['_EmissionColorUI'];
   if (emissionColor && (emissionColor.r > 0 || emissionColor.g > 0 || emissionColor.b > 0)) {
     mat.setEmissiveFactor([emissionColor.r, emissionColor.g, emissionColor.b]);
   }
 
   // Texture Mapping
   if (textureCache) {
-    // 1. Base Color Texture (_MainTex or _BaseMap)
-    const mainTexEnv = sourceMat.texEnvs['_MainTex'] || sourceMat.texEnvs['_BaseMap'];
+    // 1. Base Color Texture (_MainTex or _BaseMap or _Tex)
+    const mainTexEnv =
+      sourceMat.texEnvs['_MainTex'] ||
+      sourceMat.texEnvs['_BaseMap'] ||
+      sourceMat.texEnvs['_Tex'];
     if (mainTexEnv && mainTexEnv.textureRef?.guid) {
       const tex = textureCache.getOrCreateTexture(mainTexEnv.textureRef.guid, 'baseColorTexture');
       if (tex) {
@@ -65,8 +77,11 @@ export function createGltfMaterial(
       }
     }
 
-    // 2. Normal Texture (_BumpMap or _DetailNormalMap)
-    const bumpTexEnv = sourceMat.texEnvs['_BumpMap'] || sourceMat.texEnvs['_DetailNormalMap'];
+    // 2. Normal Texture (_BumpMap or _DetailNormalMap or _Normal)
+    const bumpTexEnv =
+      sourceMat.texEnvs['_BumpMap'] ||
+      sourceMat.texEnvs['_DetailNormalMap'] ||
+      sourceMat.texEnvs['_Normal'];
     if (bumpTexEnv && bumpTexEnv.textureRef?.guid) {
       const tex = textureCache.getOrCreateTexture(bumpTexEnv.textureRef.guid, 'normalTexture');
       if (tex) {

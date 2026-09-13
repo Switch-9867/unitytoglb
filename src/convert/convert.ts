@@ -86,15 +86,84 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     const matList: (Material | null)[] = [];
     const matGuidsKeyParts: string[] = [];
 
-    for (let subIdx = 0; subIdx < renderer.materialRefs.length; subIdx++) {
-      const matRef = renderer.materialRefs[subIdx];
-      const gMat = matRef?.guid ? gltfMaterialMap.get(matRef.guid) || null : null;
-      matList.push(gMat);
-      matGuidsKeyParts.push(matRef?.guid || 'none');
-    }
-
     const firstSub = renderer.staticBatchInfo?.firstSubMesh ?? 0;
-    const subCount = renderer.staticBatchInfo?.subMeshCount ?? 0;
+    const subCount = renderer.staticBatchInfo?.subMeshCount && renderer.staticBatchInfo.subMeshCount > 0
+      ? renderer.staticBatchInfo.subMeshCount
+      : sourceMesh.subMeshes.length - firstSub;
+    const totalSubmeshes = Math.max(renderer.materialRefs.length, subCount, 1);
+
+    for (let subIdx = 0; subIdx < totalSubmeshes; subIdx++) {
+      const matRef = renderer.materialRefs[subIdx];
+      let gMat: Material | null = null;
+      let refKey = 'none';
+
+      if (matRef?.guid) {
+        refKey = matRef.guid;
+        gMat = gltfMaterialMap.get(matRef.guid) || null;
+        if (!gMat) {
+          // Dedicated placeholder material for this unbundled GUID
+          gMat = createGltfMaterial(doc, {
+            name: `Material_${matRef.guid.slice(0, 8)}`,
+            guid: matRef.guid,
+            shaderRef: null,
+            shaderKeywords: [],
+            lightmapFlags: 0,
+            customRenderQueue: -1,
+            doubleSidedGI: false,
+            texEnvs: {},
+            floats: {},
+            colors: {},
+            stringTags: {},
+          });
+          gltfMaterialMap.set(matRef.guid, gMat);
+        }
+      } else if (matRef?.fileID) {
+        refKey = `builtin_${matRef.fileID}`;
+        gMat = gltfMaterialMap.get(refKey) || null;
+        if (!gMat) {
+          gMat = createGltfMaterial(doc, {
+            name: `Material_${matRef.fileID}`,
+            guid: refKey,
+            shaderRef: null,
+            shaderKeywords: [],
+            lightmapFlags: 0,
+            customRenderQueue: -1,
+            doubleSidedGI: false,
+            texEnvs: {},
+            floats: {},
+            colors: {},
+            stringTags: {},
+          });
+          gltfMaterialMap.set(refKey, gMat);
+        }
+      }
+
+      if (!gMat) {
+        // Material ref is missing/null: create a distinct fallback material per renderer/submesh so in-engine meshes don't lose distinct assignment
+        const fallbackKey = `default_node_${renderer.nodeFileId}_sub_${subIdx}`;
+        refKey = fallbackKey;
+        gMat = gltfMaterialMap.get(fallbackKey) || null;
+        if (!gMat) {
+          gMat = createGltfMaterial(doc, {
+            name: `DefaultMaterial_${renderer.nodeFileId}_${subIdx}`,
+            guid: fallbackKey,
+            shaderRef: null,
+            shaderKeywords: [],
+            lightmapFlags: 0,
+            customRenderQueue: -1,
+            doubleSidedGI: false,
+            texEnvs: {},
+            floats: {},
+            colors: {},
+            stringTags: {},
+          });
+          gltfMaterialMap.set(fallbackKey, gMat);
+        }
+      }
+
+      matList.push(gMat);
+      matGuidsKeyParts.push(refKey);
+    }
 
     const transformKey = isStaticBatch ? `_inv_${renderer.nodeFileId}` : '_dyn';
     const variantKey = `${renderer.meshGuid}:${transformKey}:sub_${firstSub}_${subCount}:${matGuidsKeyParts.join('_')}`;
@@ -120,9 +189,9 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
 }
 
 export async function processDocumentOptimizations(doc: Document): Promise<void> {
-  // Deduplicate materials/textures and prune unused elements. NEVER weld or quantize vertices.
+  // Deduplicate textures and prune unused elements. NEVER merge distinct materials, weld, or quantize vertices.
   await doc.transform(
-    dedup({ propertyTypes: [PropertyType.MATERIAL, PropertyType.TEXTURE] }),
+    dedup({ propertyTypes: [PropertyType.TEXTURE] }),
     prune()
   );
 }

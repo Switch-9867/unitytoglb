@@ -36,7 +36,7 @@ async function main() {
   const startOpt = Date.now();
   await doc.transform(
     weld(),
-    dedup(),
+    dedup({ propertyTypes: ['ACCESSOR', 'TEXTURE'] as any }),
     prune(),
     quantize()
   );

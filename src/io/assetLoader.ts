@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import { SourceScene, SourceMesh, SourceMaterial } from '../model/types.js';
 import { GuidIndex } from './guidIndex.js';
 import { parseSourceMesh } from '../parse/mesh.js';
-import { parseSourceMaterial } from '../parse/material.js';
+import { parseSourceMaterial, createBuiltinMaterial } from '../parse/material.js';
 import { createBuiltinPrimitiveMesh } from '../parse/builtinPrimitives.js';
 import { SourceBundle } from '../convert/convert.js';
 
@@ -32,6 +32,8 @@ export function loadAssetsForScene(scene: SourceScene, guidIndex: GuidIndex): So
     for (const matRef of renderer.materialRefs) {
       if (matRef.guid) {
         materialGuids.add(matRef.guid);
+      } else if (matRef.fileID) {
+        materialGuids.add(`builtin_${matRef.fileID}`);
       }
     }
   }
@@ -61,6 +63,12 @@ export function loadAssetsForScene(scene: SourceScene, guidIndex: GuidIndex): So
 
   const missingMaterialGuids: string[] = [];
   for (const guid of materialGuids) {
+    if (guid === '0000000000000000f000000000000000' || guid.startsWith('builtin_')) {
+      const mat = createBuiltinMaterial(guid, 'Default-Material');
+      materials.set(guid, mat);
+      continue;
+    }
+
     const entry = guidIndex.get(guid);
     if (entry && fs.existsSync(entry.assetPath) && fs.statSync(entry.assetPath).isFile()) {
       try {
