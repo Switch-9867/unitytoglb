@@ -145,8 +145,13 @@ export interface ManifestCollider {
   isTrigger: boolean;
   /** Local-space center in glTF coordinates (right-handed, Z flipped from Unity). */
   center?: [number, number, number];
-  /** Local-space center exactly as authored in Unity (left-handed, +Y up, like Resonite). */
+  /** Local-space center exactly as authored in Unity (left-handed, +Y up). */
   unityCenter?: [number, number, number];
+  /**
+   * Local-space center to set on the Resonite collider. Resonite's glTF import flips X, so
+   * relative to Unity both X and Z are negated (a 180 degree turn about Y, not a mirror).
+   */
+  resoniteCenter?: [number, number, number];
   size?: [number, number, number];
   radius?: number;
   height?: number;
@@ -190,6 +195,19 @@ export interface ManifestLight {
   shadowStrength: number;
   /** True when the light is also present in the GLB as KHR_lights_punctual (area lights are not). */
   inGlb: boolean;
+  /**
+   * Fixes for the Light component Resonite creates when importing the GLB: its import loses
+   * intensity and range, and glTF lights face -Z while Resonite lights face +Z, so directional and
+   * spot lights come in pointing backwards.
+   */
+  resonite: {
+    intensity: number;
+    range: number;
+    /** True for directional/spot lights: turn the light 180 degrees. */
+    flipForward: boolean;
+    /** Multiply onto the light slot's local rotation (slot.rotation = slot.rotation * this). Identity when not flipping. */
+    rotationFix: [number, number, number, number];
+  };
 }
 
 export interface ManifestAudioClip {
@@ -222,6 +240,13 @@ export interface ResoniteManifest {
   generator: string;
   scene: string;
   coordinateSystem: string;
+  /** Resonite model import wizard settings the manifest assumes when the GLB is imported. */
+  importSettings: {
+    scale: 'meters';
+    grabbable: false;
+    generateColliders: false;
+    note: string;
+  };
   files: { glb: string; texturesDir: string; audioDir: string; lightmapsDir: string };
   slots: { root: SlotRef; assets: SlotRef; textures: SlotRef; materials: SlotRef; colliders: SlotRef; world: SlotRef };
   textures: ManifestTexture[];
@@ -709,15 +734,16 @@ export function applyResoniteLayout(
     const base = { type: col.kind, enabled: col.enabled, isTrigger: col.isTrigger, physicMaterial, node };
     const center = col.center ? vec3(convertPosition(col.center)) : [0, 0, 0] as [number, number, number];
     const unityCenter = col.center ? vec3(col.center) : [0, 0, 0] as [number, number, number];
+    const resoniteCenter: [number, number, number] = [-center[0], center[1], center[2]];
     switch (col.kind) {
       case 'box':
-        colliderEntries.push({ ...base, center, unityCenter, size: col.size ? vec3(col.size) : [1, 1, 1], meshRef: null });
+        colliderEntries.push({ ...base, center, unityCenter, resoniteCenter, size: col.size ? vec3(col.size) : [1, 1, 1], meshRef: null });
         break;
       case 'sphere':
-        colliderEntries.push({ ...base, center, unityCenter, radius: col.radius ?? 0.5, meshRef: null });
+        colliderEntries.push({ ...base, center, unityCenter, resoniteCenter, radius: col.radius ?? 0.5, meshRef: null });
         break;
       case 'capsule':
-        colliderEntries.push({ ...base, center, unityCenter, radius: col.radius ?? 0.5, height: col.height ?? 2, direction: col.direction ?? 1, meshRef: null });
+        colliderEntries.push({ ...base, center, unityCenter, resoniteCenter, radius: col.radius ?? 0.5, height: col.height ?? 2, direction: col.direction ?? 1, meshRef: null });
         break;
       case 'mesh':
         colliderEntries.push({ ...base, convex: col.convex ?? false, meshRef: resolveColliderMesh(col, node) });
@@ -804,8 +830,17 @@ export function applyResoniteLayout(
     generator: 'scene-to-gltf',
     scene: sceneName,
     coordinateSystem:
-      'Slot transforms in the GLB are glTF (right-handed, +Y up, meters; Unity Z flipped). Collider "center" is in glTF space; ' +
-      '"unityCenter" is the original Unity value (left-handed, +Y up, same convention as Resonite). Sizes, radii and capsule axes are unchanged.',
+      'GLB: glTF (right-handed, +Y up, meters; Unity Z flipped). Resonite flips X when importing glTF, so imported slots are ' +
+      'Unity with X and Z negated (a 180 degree turn about Y). Collider "resoniteCenter" is ready to use in Resonite; "center" is ' +
+      'glTF space and "unityCenter" the original Unity value. Sizes, radii and capsule axes are unchanged.',
+    importSettings: {
+      scale: 'meters',
+      grabbable: false,
+      generateColliders: false,
+      note:
+        'Import the GLB with scale set to meters, grabbables off and collider generation off; ' +
+        'colliders come from "colliders" in this manifest.',
+    },
     files: {
       glb: options.glbFileName,
       texturesDir: options.texturesDirName,
@@ -873,6 +908,12 @@ export function applyResoniteLayout(
       shadows: l.shadowsType === 1 ? 'hard' : l.shadowsType === 2 ? 'soft' : 'none',
       shadowStrength: l.shadowStrength ?? 1,
       inGlb: !!node.getExtension('KHR_lights_punctual'),
+      resonite: {
+        intensity: l.intensity,
+        range: l.range,
+        flipForward: l.type === 0 || l.type === 1,
+        rotationFix: l.type === 0 || l.type === 1 ? [0, 1, 0, 0] : [0, 0, 0, 1],
+      },
     })),
     audioClips: [...audioClipIds.values()],
     audioSources: audioEntries.map(({ node, ...a }) => ({ ...a, slot: slot(node) })),

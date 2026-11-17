@@ -66,6 +66,8 @@ describe('Resonite layout', () => {
       audioDirName: 'SampleScene_audio',
     });
 
+    expect(manifest.importSettings).toMatchObject({ scale: 'meters', grabbable: false, generateColliders: false });
+
     // Hierarchy
     const [root] = doc.getRoot().listScenes()[0].listChildren();
     expect(root.getName()).toBe('SampleScene');
@@ -100,11 +102,14 @@ describe('Resonite layout', () => {
       id: COLLISION_ONLY_GUID,
       slot: { path: ['Assets', 'Colliders', '15_ki_coll'], indexPath: [0, 2, 0] },
     });
-    expect(box).toMatchObject({ type: 'box', center: [1, 2, -3], unityCenter: [1, 2, 3], size: [4, 5, 6], slot: { path: ['World', 'RootObject'] } });
+    expect(box).toMatchObject({ type: 'box', center: [1, 2, -3], unityCenter: [1, 2, 3], resoniteCenter: [-1, 2, -3], size: [4, 5, 6], slot: { path: ['World', 'RootObject'] } });
 
     // Lights: Unity type 2 = point, also present in the GLB
     expect(manifest.lights).toEqual([
-      expect.objectContaining({ type: 'point', bakeMode: 'realtime', shadows: 'soft', inGlb: true }),
+      expect.objectContaining({
+        type: 'point', bakeMode: 'realtime', shadows: 'soft', inGlb: true,
+        resonite: { intensity: 2, range: 8, flipForward: false, rotationFix: [0, 0, 0, 1] },
+      }),
     ]);
 
     // Empty asset slots survive a GLB round trip
