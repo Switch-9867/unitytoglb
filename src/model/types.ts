@@ -150,7 +150,11 @@ export interface SourceLight {
   spotAngleDegrees: number;
   innerSpotAngleDegrees: number;
   shadowsType: number;
+  shadowStrength?: number;
   cookieGuid: string | null;
+  enabled?: boolean;
+  /** m_Lightmapping: 4 = Realtime, 1 = Mixed, 2 = Baked */
+  bakeMode?: number;
 }
 
 export interface SourceRenderer {
@@ -177,7 +181,9 @@ export interface SourceCollider {
   fileID: number;
   nodeFileId: number;
   kind: 'mesh' | 'box' | 'sphere' | 'capsule';
+  enabled: boolean;
   isTrigger: boolean;
+  convex?: boolean;
   materialRef: Ref | null;
   meshRef?: Ref | null;
   center?: Vec3;
@@ -206,6 +212,16 @@ export interface SourceAudioSource {
   pitch: number;
   loop: boolean;
   spatialize: boolean;
+  enabled?: boolean;
+  mute?: boolean;
+  minDistance?: number;
+  maxDistance?: number;
+  /** 0 = Logarithmic, 1 = Linear, 2 = Custom */
+  rolloffMode?: number;
+  /** 0 = 2D, 1 = fully 3D (first key of panLevelCustomCurve) */
+  spatialBlend?: number;
+  dopplerLevel?: number;
+  priority?: number;
 }
 
 export interface SourceAnimator {

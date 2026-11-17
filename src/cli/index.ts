@@ -13,6 +13,7 @@ import {
   exportSourceBundleToGltfFiles,
   ConvertOptions,
 } from '../convert/convert.js';
+import { exportResoniteBundle } from '../convert/resonite.js';
 
 interface CliArgs {
   targetPath: string;
@@ -24,6 +25,7 @@ interface CliArgs {
   separateTextures: boolean;
   texturesDir?: string;
   rotateYUp: boolean;
+  resonite: boolean;
   optimize: boolean;
   quiet: boolean;
   help: boolean;
@@ -35,6 +37,7 @@ function parseArgs(args: string[]): CliArgs {
     skipTextures: false,
     separateTextures: false,
     rotateYUp: false,
+    resonite: false,
     optimize: false,
     quiet: false,
     help: false,
@@ -46,6 +49,8 @@ function parseArgs(args: string[]): CliArgs {
       result.help = true;
     } else if (arg === '-q' || arg === '--quiet') {
       result.quiet = true;
+    } else if (arg === '--resonite') {
+      result.resonite = true;
     } else if (arg === '-O' || arg === '--optimize') {
       result.optimize = true;
     } else if (arg === '--rotate-y-up' || arg === '-ry') {
@@ -92,6 +97,8 @@ Options:
   --separate-textures, -st   Extract textures to separate files instead of embedding in GLB
   --textures-dir, -td <dir>   Directory name/path for extracted textures (default: textures)
   --rotate-y-up, -ry          Apply +90 deg X master root node rotation to orient scene +Y Up
+  --resonite                 Resonite import layout: GLB with Assets/{Textures,Materials,Colliders} + World,
+                              textures/audio copied to <name>_textures/ and <name>_audio/, and an import manifest <name>.resonite.json
   -O, --optimize              Deduplicate materials/textures and prune unused glTF elements
   -q, --quiet                 Suppress non-error logging
   -h, --help                  Show this help message
@@ -126,7 +133,7 @@ export async function main() {
     const sceneFilePath = findSceneFile(rootInfo, args.sceneName);
 
     const sceneBasename = path.basename(sceneFilePath, '.unity');
-    const outFormat = args.format || (args.outputPath?.endsWith('.gltf') ? 'gltf' : 'glb');
+    const outFormat = args.resonite ? 'glb' : args.format || (args.outputPath?.endsWith('.gltf') ? 'gltf' : 'glb');
     const finalOutputPath = path.resolve(
       args.outputPath || `${sceneBasename}.${outFormat}`
     );
@@ -202,7 +209,21 @@ export async function main() {
     const startTime = Date.now();
     let outputFileSize = 0;
 
-    if (outFormat === 'gltf') {
+    if (args.resonite) {
+      log(`    [Resonite] Writing GLB, textures and import manifest...`);
+      const res = await exportResoniteBundle(bundle, finalOutputPath);
+      outputFileSize = res.glbBytes;
+      const st = res.manifest.stats;
+      log(`    Textures:  ${st.textures} -> ${res.texturesDir}`);
+      log(`    Materials: ${st.materials}`);
+      log(`    Colliders: ${st.colliders} (${st.meshCollidersUsingVisibleMesh} mesh colliders reuse visible meshes, ${st.collisionOnlyMeshes} collision-only meshes)`);
+      log(`    Lights:    ${st.lights}`);
+      log(`    Audio:     ${st.audioSources} sources, ${st.audioClips} clips`);
+      log(`    Manifest:  ${res.manifestPath}`);
+      if (res.manifest.warnings.length > 0) {
+        log(`    [Warning] ${res.manifest.warnings.length} manifest warning(s); see "warnings" in the manifest`);
+      }
+    } else if (outFormat === 'gltf') {
       log(`    Writing glTF JSON & assets to ${finalOutputPath}...`);
       await exportSourceBundleToGltfFiles(bundle, finalOutputPath, convertOptions);
       if (fs.existsSync(finalOutputPath)) {

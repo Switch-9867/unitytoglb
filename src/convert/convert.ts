@@ -3,7 +3,7 @@
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { Document, NodeIO, Mesh, Material, PropertyType } from '@gltf-transform/core';
+import { Document, NodeIO, Mesh, Material, Node, Scene, PropertyType } from '@gltf-transform/core';
 import { KHRTextureTransform, KHRLightsPunctual } from '@gltf-transform/extensions';
 import { prune, dedup } from '@gltf-transform/functions';
 import { SourceScene, SourceMesh, SourceMaterial } from '../model/types.js';
@@ -27,14 +27,42 @@ export interface ConvertOptions {
   separateTextures?: boolean;
   texturesDir?: string; // relative or absolute folder name for external textures
   rotateYUp?: boolean;
+  /** Embed no textures; keep materials as untextured placeholders (used by the Resonite layout). */
+  untexturedMaterials?: boolean;
+}
+
+export interface RendererMeshInfo {
+  meshGuid: string;
+  isStaticBatch: boolean;
+  firstSubMesh: number;
+  subMeshCount: number;
+}
+
+/** Internal lookup tables produced during conversion, used by post-processing layouts. */
+export interface ConversionContext {
+  scene: Scene;
+  buffer: import('@gltf-transform/core').Buffer;
+  /** key: material GUID / builtin_<fileID> / default_node_<id>_sub_<n> */
+  materials: Map<string, Material>;
+  /** Unity transform fileID -> glTF node */
+  nodes: Map<number, Node>;
+  /** Unity transform fileID -> mesh info of the renderer on that node */
+  rendererMeshes: Map<number, RendererMeshInfo>;
 }
 
 export function convertSourceBundleToGltf(bundle: SourceBundle, options?: ConvertOptions): Document {
+  return buildGltfDocument(bundle, options).doc;
+}
+
+export function buildGltfDocument(
+  bundle: SourceBundle,
+  options?: ConvertOptions
+): { doc: Document; ctx: ConversionContext } {
   const doc = new Document();
   const buffer = doc.createBuffer('binary_buffer');
 
   // Texture Manager for materials (only create if skipTextures is false)
-  const textureCache = bundle.guidIndex && !options?.skipTextures
+  const textureCache = bundle.guidIndex && !options?.skipTextures && !options?.untexturedMaterials
     ? createTextureManager(doc, bundle.guidIndex)
     : undefined;
 
@@ -71,6 +99,7 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
   // 3. Convert Meshes per Renderer with Per-Submesh Inverse Transform Matrix Slicing
   const meshVariantMap = new Map<string, Mesh>();
   const nodeMeshMap = new Map<number, Mesh>();
+  const rendererMeshes = new Map<number, RendererMeshInfo>();
 
   for (const renderer of bundle.scene.renderers) {
     if (!renderer.meshGuid || !bundle.meshes.has(renderer.meshGuid)) {
@@ -175,17 +204,26 @@ export function convertSourceBundleToGltf(bundle: SourceBundle, options?: Conver
     }
 
     nodeMeshMap.set(renderer.nodeFileId, gltfMesh);
+    rendererMeshes.set(renderer.nodeFileId, {
+      meshGuid: renderer.meshGuid,
+      isStaticBatch,
+      firstSubMesh: firstSub,
+      subMeshCount: subCount,
+    });
   }
 
   // 4. Convert Scene Hierarchy (100% preserving node local transforms and parent-child edges)
-  createGltfSceneGraph(
+  const { scene, nodeMap } = createGltfSceneGraph(
     doc,
     bundle.scene,
     (nodeFileId) => nodeMeshMap.get(nodeFileId) || null,
     { rotateYUp: options?.rotateYUp }
   );
 
-  return doc;
+  return {
+    doc,
+    ctx: { scene, buffer, materials: gltfMaterialMap, nodes: nodeMap, rendererMeshes },
+  };
 }
 
 export async function processDocumentOptimizations(doc: Document): Promise<void> {

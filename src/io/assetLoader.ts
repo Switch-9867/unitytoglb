@@ -13,6 +13,7 @@ export interface AssetLoadingReport {
   uniqueMeshGuids: number;
   loadedMeshes: number;
   missingMeshGuids: string[];
+  colliderMeshGuids: number;
   uniqueMaterialGuids: number;
   loadedMaterials: number;
   missingMaterialGuids: string[];
@@ -35,6 +36,16 @@ export function loadAssetsForScene(scene: SourceScene, guidIndex: GuidIndex): So
       } else if (matRef.fileID) {
         materialGuids.add(`builtin_${matRef.fileID}`);
       }
+    }
+  }
+
+  // Mesh collider meshes (often collision-only meshes with no renderer)
+  const colliderMeshGuids = new Set<string>();
+  for (const col of scene.colliders) {
+    const key = colliderMeshKey(col.meshRef);
+    if (key) {
+      colliderMeshGuids.add(key);
+      meshGuids.add(key);
     }
   }
 
@@ -86,6 +97,7 @@ export function loadAssetsForScene(scene: SourceScene, guidIndex: GuidIndex): So
   const report: AssetLoadingReport = {
     totalRenderers: scene.renderers.length,
     uniqueMeshGuids: meshGuids.size,
+    colliderMeshGuids: colliderMeshGuids.size,
     loadedMeshes: meshes.size,
     missingMaterialGuids,
     uniqueMaterialGuids: materialGuids.size,
@@ -100,4 +112,12 @@ export function loadAssetsForScene(scene: SourceScene, guidIndex: GuidIndex): So
     guidIndex,
     report,
   };
+}
+
+/** Key used in the mesh map for a collider's mesh reference (GUID, or builtin_<fileID> for Unity builtin primitives). */
+export function colliderMeshKey(ref: { fileID: number; guid?: string } | null | undefined): string | null {
+  if (!ref) return null;
+  if (ref.guid && ref.guid !== '0000000000000000e000000000000000') return ref.guid;
+  if (ref.fileID) return `builtin_${ref.fileID}`;
+  return null;
 }

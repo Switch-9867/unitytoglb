@@ -199,7 +199,10 @@ export function parseRawDocsToSourceScene(rawDocs: RawYamlDocument[], sceneName:
           spotAngleDegrees,
           innerSpotAngleDegrees,
           shadowsType,
+          shadowStrength: shadowsObj ? ((shadowsObj['m_Strength'] as number) ?? 1) : 1,
           cookieGuid: cookieRef?.guid || null,
+          enabled: d['m_Enabled'] === undefined ? true : d['m_Enabled'] === 1 || d['m_Enabled'] === true,
+          bakeMode: (d['m_Lightmapping'] as number) ?? 4,
         });
         break;
       }
@@ -279,7 +282,9 @@ export function parseRawDocsToSourceScene(rawDocs: RawYamlDocument[], sceneName:
           fileID: doc.fileId,
           nodeFileId,
           kind,
+          enabled: d['m_Enabled'] === undefined ? true : d['m_Enabled'] === 1 || d['m_Enabled'] === true,
           isTrigger,
+          convex: doc.classId === 64 ? d['m_Convex'] === 1 || d['m_Convex'] === true : undefined,
           materialRef,
           meshRef,
           center,
@@ -317,6 +322,14 @@ export function parseRawDocsToSourceScene(rawDocs: RawYamlDocument[], sceneName:
           pitch: (d['m_Pitch'] as number) ?? 1,
           loop: d['Loop'] === 1 || d['Loop'] === true,
           spatialize: d['Spatialize'] === 1 || d['Spatialize'] === true,
+          enabled: d['m_Enabled'] === undefined ? true : d['m_Enabled'] === 1 || d['m_Enabled'] === true,
+          mute: d['Mute'] === 1 || d['Mute'] === true,
+          minDistance: (d['MinDistance'] as number) ?? 1,
+          maxDistance: (d['MaxDistance'] as number) ?? 500,
+          rolloffMode: (d['rolloffMode'] as number) ?? 0,
+          spatialBlend: firstCurveValue(d['panLevelCustomCurve']) ?? 0,
+          dopplerLevel: (d['DopplerLevel'] as number) ?? 1,
+          priority: (d['Priority'] as number) ?? 128,
         });
         break;
       }
@@ -475,4 +488,14 @@ export function parseRef(val: unknown): Ref | null {
 
   if (fileID === 0 && !guid) return null;
   return { fileID, guid, type };
+}
+
+/** Value of the first key of a serialized AnimationCurve (e.g. AudioSource spatial blend). */
+function firstCurveValue(curve: unknown): number | undefined {
+  const keys = (curve as Record<string, unknown> | undefined)?.['m_Curve'];
+  if (Array.isArray(keys) && keys.length > 0) {
+    const v = (keys[0] as Record<string, unknown>)['value'];
+    return typeof v === 'number' ? v : undefined;
+  }
+  return undefined;
 }
