@@ -47,6 +47,12 @@ export function createGltfMesh(
 
   const totalVertices = Math.floor(rawPositionsAll.length / 3);
 
+  // A mirroring transform (negative determinant, e.g. the inverse world matrix of a negatively
+  // scaled static-batched object) reverses triangle orientation. The cofactor normal transform
+  // also carries the determinant's sign, and tangent handedness flips. Compensate for all three
+  // so the baked local-space mesh renders correctly once the node's own (mirrored) transform applies.
+  const mirrored = posTransform ? determinant3x3(posTransform) < 0 : false;
+
   // Create primitive per submesh
   for (let subIdx = startSub; subIdx < endSub; subIdx++) {
     const submesh = sourceMesh.subMeshes[subIdx];
@@ -113,9 +119,10 @@ export function createGltfMesh(
             y: normSlice[i + 1],
             z: normSlice[i + 2],
           });
-          transformedNorm[i] = vec.x;
-          transformedNorm[i + 1] = vec.y;
-          transformedNorm[i + 2] = vec.z;
+          const sign = mirrored ? -1 : 1;
+          transformedNorm[i] = vec.x * sign;
+          transformedNorm[i + 1] = vec.y * sign;
+          transformedNorm[i + 2] = vec.z * sign;
         }
         normSlice = transformedNorm;
       }
@@ -145,7 +152,7 @@ export function createGltfMesh(
           transformedTan[i] = vec.x / len;
           transformedTan[i + 1] = vec.y / len;
           transformedTan[i + 2] = vec.z / len;
-          transformedTan[i + 3] = tanSlice[i + 3];
+          transformedTan[i + 3] = mirrored ? -tanSlice[i + 3] : tanSlice[i + 3];
         }
         tanSlice = transformedTan;
       }
@@ -181,7 +188,8 @@ export function createGltfMesh(
       reindexed[i] = Math.max(0, Math.min(relIdx, sliceVertexCount - 1));
     }
 
-    const reversedIndices = reverseTriangleWinding(reindexed);
+    // Z-flip handedness conversion reverses winding; a mirroring bake transform reverses it back.
+    const reversedIndices = mirrored ? reindexed : reverseTriangleWinding(reindexed);
     const indexAccessor = doc
       .createAccessor()
       .setName(`${meshName}_sub${subIdx}_indices`)
@@ -202,4 +210,13 @@ export function createGltfMesh(
   }
 
   return mesh;
+}
+
+function determinant3x3(m: Matrix4): number {
+  // column-major: m[0..2] = column 0, m[4..6] = column 1, m[8..10] = column 2
+  return (
+    m[0] * (m[5] * m[10] - m[9] * m[6]) -
+    m[4] * (m[1] * m[10] - m[9] * m[2]) +
+    m[8] * (m[1] * m[6] - m[5] * m[2])
+  );
 }
