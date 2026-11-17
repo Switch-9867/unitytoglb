@@ -169,6 +169,8 @@ export interface SourceRenderer {
   staticBatchInfo?: { firstSubMesh: number; subMeshCount: number };
   staticBatchRoot?: Ref | null;
   isStatic: boolean;
+  /** m_Enabled: disabled renderers are invisible in Unity. */
+  enabled?: boolean;
 }
 
 export interface SourceMeshFilter {

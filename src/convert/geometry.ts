@@ -52,6 +52,7 @@ export function createGltfMesh(
   // also carries the determinant's sign, and tangent handedness flips. Compensate for all three
   // so the baked local-space mesh renders correctly once the node's own (mirrored) transform applies.
   const mirrored = posTransform ? determinant3x3(posTransform) < 0 : false;
+  const rawUV1All = extractChannelFloat32(sourceMesh.vertexData, 5);
 
   // Create primitive per submesh
   for (let subIdx = startSub; subIdx < endSub; subIdx++) {
@@ -178,6 +179,18 @@ export function createGltfMesh(
         .setArray(convertedUV0)
         .setBuffer(buffer);
       primitive.setAttribute('TEXCOORD_0', uv0Accessor);
+    }
+
+    // 4b. TEXCOORD_1 slice (Unity UV2: lightmap UVs)
+    if (rawUV1All && rawUV1All.length >= (firstV + sliceVertexCount) * 2) {
+      const uv1Slice = rawUV1All.subarray(firstV * 2, (firstV + sliceVertexCount) * 2);
+      const uv1Accessor = doc
+        .createAccessor()
+        .setName(`${meshName}_sub${subIdx}_uv1`)
+        .setType('VEC2')
+        .setArray(convertUVsArray(uv1Slice))
+        .setBuffer(buffer);
+      primitive.setAttribute('TEXCOORD_1', uv1Accessor);
     }
 
     // 5. INDICES (re-indexed relative to firstV with boundary clamping)

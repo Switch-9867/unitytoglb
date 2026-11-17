@@ -26,6 +26,7 @@ interface CliArgs {
   texturesDir?: string;
   rotateYUp: boolean;
   resonite: boolean;
+  skipHidden: boolean;
   optimize: boolean;
   quiet: boolean;
   help: boolean;
@@ -38,6 +39,7 @@ function parseArgs(args: string[]): CliArgs {
     separateTextures: false,
     rotateYUp: false,
     resonite: false,
+    skipHidden: false,
     optimize: false,
     quiet: false,
     help: false,
@@ -51,6 +53,8 @@ function parseArgs(args: string[]): CliArgs {
       result.quiet = true;
     } else if (arg === '--resonite') {
       result.resonite = true;
+    } else if (arg === '--skip-hidden') {
+      result.skipHidden = true;
     } else if (arg === '-O' || arg === '--optimize') {
       result.optimize = true;
     } else if (arg === '--rotate-y-up' || arg === '-ry') {
@@ -97,8 +101,9 @@ Options:
   --separate-textures, -st   Extract textures to separate files instead of embedding in GLB
   --textures-dir, -td <dir>   Directory name/path for extracted textures (default: textures)
   --rotate-y-up, -ry          Apply +90 deg X master root node rotation to orient scene +Y Up
-  --resonite                 Resonite import layout: GLB with Assets/{Textures,Materials,Colliders} + World,
+  --resonite                  Resonite import layout: GLB with Assets/{Textures,Materials,Colliders} + World,
                               textures/audio copied to <name>_textures/ and <name>_audio/, and an import manifest <name>.resonite.json
+  --skip-hidden               Leave out meshes that are invisible in Unity (disabled renderer / inactive object)
   -O, --optimize              Deduplicate materials/textures and prune unused glTF elements
   -q, --quiet                 Suppress non-error logging
   -h, --help                  Show this help message
@@ -166,6 +171,7 @@ export async function main() {
       separateTextures: args.separateTextures,
       texturesDir: args.texturesDir,
       rotateYUp: args.rotateYUp,
+      skipHidden: args.skipHidden,
     };
 
     const assets = await loadAssetsForScene(scene, rootInfo.guidIndex);
@@ -204,6 +210,7 @@ export async function main() {
       meshes: assets.meshes,
       materials: assets.materials,
       guidIndex: rootInfo.guidIndex,
+      lighting: assets.lighting,
     };
 
     const startTime = Date.now();
@@ -211,12 +218,14 @@ export async function main() {
 
     if (args.resonite) {
       log(`    [Resonite] Writing GLB, textures and import manifest...`);
-      const res = await exportResoniteBundle(bundle, finalOutputPath);
+      const res = await exportResoniteBundle(bundle, finalOutputPath, { skipHidden: args.skipHidden });
       outputFileSize = res.glbBytes;
       const st = res.manifest.stats;
       log(`    Textures:  ${st.textures} -> ${res.texturesDir}`);
       log(`    Materials: ${st.materials}`);
       log(`    Colliders: ${st.colliders} (${st.meshCollidersUsingVisibleMesh} mesh colliders reuse visible meshes, ${st.collisionOnlyMeshes} collision-only meshes)`);
+      log(`    Hidden:    ${st.hiddenRenderers} disabled renderers, ${st.inactiveSlots} inactive objects${args.skipHidden ? ' (meshes left out)' : ' (listed in manifest)'}`);
+      log(`    Lightmaps: ${st.lightmaps} decoded (${st.lightmappedRenderers} lightmapped renderers)`);
       log(`    Lights:    ${st.lights}`);
       log(`    Audio:     ${st.audioSources} sources, ${st.audioClips} clips`);
       log(`    Manifest:  ${res.manifestPath}`);

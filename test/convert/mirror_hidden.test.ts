@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Document } from '@gltf-transform/core';
+import { parseSourceScene } from '../../src/parse/scene.js';
 import { parseSourceMesh, extractChannelFloat32 } from '../../src/parse/mesh.js';
 import { createGltfMesh } from '../../src/convert/geometry.js';
+import { buildGltfDocument, SourceBundle } from '../../src/convert/convert.js';
+import { applyResoniteLayout } from '../../src/convert/resonite.js';
 import { createTRSMatrix, invertMatrix } from '../../src/convert/matrix.js';
 
 const MESH_PATH = path.resolve('AssetRipper_export_20260811_145909/ExportedProject/Assets/Mesh/15_ki_coll.asset');
@@ -45,5 +48,32 @@ describe('static-batch bake through a mirroring transform', () => {
     if (pt && mt) {
       for (let i = 3; i < pt.length; i += 4) expect(mt[i]).toBe(-pt[i]);
     }
+  });
+});
+
+describe('hidden renderers', () => {
+  function bundle(): SourceBundle {
+    const scene = parseSourceScene(fs.readFileSync(path.resolve('test/fixtures/sample_scene.unity'), 'utf8'), 'SampleScene');
+    scene.renderers[0].enabled = false; // ChildMesh renderer disabled
+    scene.nodes.get(301)!.active = false; // Main Camera object inactive
+    return {
+      scene,
+      meshes: new Map([[MESH_GUID, parseSourceMesh(fs.readFileSync(MESH_PATH, 'utf8'), MESH_GUID)]]),
+      materials: new Map(),
+    };
+  }
+
+  it('lists disabled renderers and inactive objects in the manifest', () => {
+    const b = bundle();
+    const { doc, ctx } = buildGltfDocument(b, { untexturedMaterials: true });
+    const manifest = applyResoniteLayout(doc, b, ctx, { glbFileName: 'x.glb', texturesDirName: 't', audioDirName: 'a' });
+    expect(manifest.renderers).toEqual([expect.objectContaining({ enabled: false })]);
+    expect(manifest.inactiveSlots).toEqual([{ path: ['World', 'RootObject', 'Main Camera'], indexPath: [1, 0, 1] }]);
+  });
+
+  it('leaves hidden meshes out with skipHidden', () => {
+    const b = bundle();
+    const { ctx } = buildGltfDocument(b, { untexturedMaterials: true, skipHidden: true });
+    expect(ctx.nodes.get(201)!.getMesh()).toBeNull();
   });
 });

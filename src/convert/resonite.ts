@@ -19,7 +19,11 @@ import { SourceMesh, SourceMaterial, SourceCollider, Ref, Vec3 } from '../model/
 import { GuidIndex } from '../io/guidIndex.js';
 import { colliderMeshKey } from '../io/assetLoader.js';
 import { createBuiltinPrimitiveMesh } from '../parse/builtinPrimitives.js';
-import { SourceBundle, ConversionContext } from './convert.js';
+import { LIGHTMAP_INDEX_NONE } from '../parse/lightingData.js';
+import { parseTexture2DAsset, UNITY_TEXTURE_FORMAT_BC6H } from '../parse/texture2d.js';
+import { decodeBc6hImage } from '../parse/bc6h.js';
+import { writeRadianceHdr } from '../io/hdr.js';
+import { SourceBundle, ConversionContext, computeInactiveNodes } from './convert.js';
 import { createGltfMesh } from './geometry.js';
 import { convertPosition } from './coords.js';
 
@@ -94,8 +98,36 @@ export interface ManifestMaterial {
   } | null;
 }
 
+export interface ManifestRendererLightmap {
+  /** Index into manifest.lightmaps */
+  index: number;
+  /**
+   * Scale/offset to apply to TEXCOORD_1 in Unity UV convention (v up): uv * (x, y) + (z, w).
+   * [1, 1, 0, 0] for static-batched renderers, whose UV1 already has it baked in.
+   */
+  scaleOffset: [number, number, number, number];
+  /** The same transform in glTF UV convention (v down), for use on the GLB's TEXCOORD_1 directly. */
+  scaleOffsetGltf: [number, number, number, number];
+}
+
+export interface ManifestLightmap {
+  index: number;
+  id: string;
+  name: string;
+  /** Linear HDR Radiance file, relative to the manifest. Top row first, like other image files. */
+  file: string;
+  width: number;
+  height: number;
+  /** Brightest channel value in the lightmap (values above 1 are normal for HDR lightmaps). */
+  maxValue: number;
+}
+
 export interface ManifestRenderer {
   slot: SlotRef;
+  /** Baked lightmap for this renderer (sample with TEXCOORD_1), or null when not lightmapped. */
+  lightmap: ManifestRendererLightmap | null;
+  /** False when the Unity MeshRenderer was disabled (invisible in the original world). */
+  enabled: boolean;
   /** Material id for each glTF primitive (submesh) of the slot's mesh, in primitive order. */
   materials: string[];
   castShadows: boolean;
@@ -190,7 +222,7 @@ export interface ResoniteManifest {
   generator: string;
   scene: string;
   coordinateSystem: string;
-  files: { glb: string; texturesDir: string; audioDir: string };
+  files: { glb: string; texturesDir: string; audioDir: string; lightmapsDir: string };
   slots: { root: SlotRef; assets: SlotRef; textures: SlotRef; materials: SlotRef; colliders: SlotRef; world: SlotRef };
   textures: ManifestTexture[];
   materials: ManifestMaterial[];
@@ -199,6 +231,11 @@ export interface ResoniteManifest {
   colliders: ManifestCollider[];
   physicMaterials: ManifestPhysicMaterial[];
   rigidbodies: ManifestRigidbody[];
+  /** Topmost inactive GameObjects; deactivate these slots (their children inherit it). */
+  inactiveSlots: SlotRef[];
+  /** Baked lightmaps; renderers reference them by index. */
+  lightmaps: ManifestLightmap[];
+  lightmapsMode: 'nonDirectional' | 'directional' | null;
   lights: ManifestLight[];
   audioClips: ManifestAudioClip[];
   audioSources: ManifestAudioSource[];
@@ -209,6 +246,10 @@ export interface ResoniteManifest {
     colliders: number;
     meshCollidersUsingVisibleMesh: number;
     collisionOnlyMeshes: number;
+    hiddenRenderers: number;
+    lightmaps: number;
+    lightmappedRenderers: number;
+    inactiveSlots: number;
     lights: number;
     audioClips: number;
     audioSources: number;
@@ -226,6 +267,10 @@ export interface ResoniteLayoutOptions {
   audioDirName: string;
   /** Absolute directory to copy audio files into; omit to skip copying. */
   audioDirAbs?: string;
+  /** Directory (relative to the manifest) the decoded lightmaps are written to. */
+  lightmapsDirName?: string;
+  /** Absolute directory to write decoded lightmaps into; omit to skip decoding. */
+  lightmapsDirAbs?: string;
 }
 
 /** Hands out unique names within one folder. */
@@ -511,6 +556,47 @@ export function applyResoniteLayout(
     materialEntries.push({ id: key, name, pbr, unity, node });
   }
 
+  // --- Lightmaps (BC6H Texture2D assets decoded to linear HDR) ---------------
+  const lightmapEntries: ManifestLightmap[] = [];
+  const lightmapIndexMap = new Map<number, number>(); // Unity lightmap index -> manifest index
+  if (bundle.lighting && options.lightmapsDirAbs) {
+    fs.mkdirSync(options.lightmapsDirAbs, { recursive: true });
+    const lightmapNames = new NameAllocator();
+    bundle.lighting.lightmaps.forEach((lmap, unityIndex) => {
+      const guid = lmap.color?.guid;
+      const entry = guid ? bundle.guidIndex?.get(guid) : undefined;
+      if (!guid || !entry || !fs.existsSync(entry.assetPath)) {
+        warnings.push(`Lightmap ${unityIndex}: texture ${guid ?? '(none)'} not found`);
+        return;
+      }
+      try {
+        const tex = parseTexture2DAsset(fs.readFileSync(entry.assetPath, 'utf8'));
+        if (tex.textureFormat !== UNITY_TEXTURE_FORMAT_BC6H) {
+          warnings.push(`Lightmap ${unityIndex} (${tex.name}): texture format ${tex.textureFormat} is not supported (only BC6H)`);
+          return;
+        }
+        const rgb = decodeBc6hImage(tex.data, tex.width, tex.height);
+        let maxValue = 0;
+        for (let i = 0; i < rgb.length; i++) if (rgb[i] > maxValue) maxValue = rgb[i];
+        const name = lightmapNames.take(tex.name || `Lightmap_${unityIndex}`);
+        // Unity texture memory is bottom row first; image files are top row first.
+        writeRadianceHdr(path.join(options.lightmapsDirAbs!, `${name}.hdr`), rgb, tex.width, tex.height, 'bottom-up');
+        lightmapIndexMap.set(unityIndex, lightmapEntries.length);
+        lightmapEntries.push({
+          index: lightmapEntries.length,
+          id: guid,
+          name,
+          file: path.posix.join(options.lightmapsDirName ?? 'lightmaps', `${name}.hdr`),
+          width: tex.width,
+          height: tex.height,
+          maxValue,
+        });
+      } catch (e) {
+        warnings.push(`Lightmap ${unityIndex}: ${(e as Error).message}`);
+      }
+    });
+  }
+
   // --- Renderers ------------------------------------------------------------
   const rendererEntries: Array<Omit<ManifestRenderer, 'slot'> & { node: Node }> = [];
   for (const renderer of bundle.scene.renderers) {
@@ -521,7 +607,21 @@ export function applyResoniteLayout(
       const m = p.getMaterial();
       return m ? materialIdByGltf.get(m) ?? '' : '';
     });
+    const lm = bundle.lighting?.renderers.get(renderer.fileID);
+    let lightmap: ManifestRendererLightmap | null = null;
+    if (lm && lm.lightmapIndex < LIGHTMAP_INDEX_NONE && lightmapIndexMap.has(lm.lightmapIndex)) {
+      // Unity static batching bakes lightmapScaleOffset into the combined mesh's UV1.
+      const batched = ctx.rendererMeshes.get(renderer.nodeFileId)?.isStaticBatch ?? false;
+      const [sx, sy, ox, oy] = batched ? [1, 1, 0, 0] : lm.scaleOffset;
+      lightmap = {
+        index: lightmapIndexMap.get(lm.lightmapIndex)!,
+        scaleOffset: [sx, sy, ox, oy],
+        scaleOffsetGltf: [sx, sy, ox, 1 - sy - oy],
+      };
+    }
     rendererEntries.push({
+      lightmap,
+      enabled: renderer.enabled !== false,
       materials,
       castShadows: renderer.castShadows,
       receiveShadows: renderer.receiveShadows,
@@ -625,6 +725,8 @@ export function applyResoniteLayout(
     }
   }
 
+  const inactiveNodes = computeInactiveNodes(bundle.scene);
+
   // --- Rigidbodies ----------------------------------------------------------
   const rigidbodyEntries = bundle.scene.rigidbodies
     .map((rb) => ({ rb, node: ctx.nodes.get(rb.nodeFileId) }))
@@ -704,7 +806,12 @@ export function applyResoniteLayout(
     coordinateSystem:
       'Slot transforms in the GLB are glTF (right-handed, +Y up, meters; Unity Z flipped). Collider "center" is in glTF space; ' +
       '"unityCenter" is the original Unity value (left-handed, +Y up, same convention as Resonite). Sizes, radii and capsule axes are unchanged.',
-    files: { glb: options.glbFileName, texturesDir: options.texturesDirName, audioDir: options.audioDirName },
+    files: {
+      glb: options.glbFileName,
+      texturesDir: options.texturesDirName,
+      audioDir: options.audioDirName,
+      lightmapsDir: options.lightmapsDirName ?? 'lightmaps',
+    },
     slots: {
       root: slot(root),
       assets: slot(assets),
@@ -744,6 +851,16 @@ export function applyResoniteLayout(
       useGravity: rb.useGravity,
       isKinematic: rb.isKinematic,
     })),
+    inactiveSlots: [...inactiveNodes]
+      .filter((id) => {
+        const parent = bundle.scene.nodes.get(id)?.parentFileId;
+        return !(parent && inactiveNodes.has(parent));
+      })
+      .map((id) => ctx.nodes.get(id))
+      .filter((n): n is Node => !!n)
+      .map(slot),
+    lightmaps: lightmapEntries,
+    lightmapsMode: bundle.lighting ? (bundle.lighting.lightmapsMode === 1 ? 'directional' : 'nonDirectional') : null,
     lights: lightEntries.map(({ l, node }) => ({
       slot: slot(node),
       type: lightTypes[l.type] ?? 'point',
@@ -766,6 +883,10 @@ export function applyResoniteLayout(
       colliders: colliderEntries.length,
       meshCollidersUsingVisibleMesh: sharedCount,
       collisionOnlyMeshes: colliderMeshIds.size,
+      hiddenRenderers: rendererEntries.filter((r) => !r.enabled).length,
+      lightmaps: lightmapEntries.length,
+      lightmappedRenderers: rendererEntries.filter((r) => r.lightmap).length,
+      inactiveSlots: inactiveNodes.size,
       lights: lightEntries.length,
       audioClips: audioClipIds.size,
       audioSources: audioEntries.length,
@@ -777,7 +898,8 @@ export function applyResoniteLayout(
 /** Convert a bundle into a Resonite-layout GLB, a texture folder and a manifest next to it. */
 export async function exportResoniteBundle(
   bundle: SourceBundle,
-  glbPath: string
+  glbPath: string,
+  options?: { skipHidden?: boolean }
 ): Promise<{ manifestPath: string; texturesDir: string; manifest: ResoniteManifest; glbBytes: number }> {
   const { buildGltfDocument } = await import('./convert.js');
   const { NodeIO } = await import('@gltf-transform/core');
@@ -789,15 +911,19 @@ export async function exportResoniteBundle(
   const texturesDirAbs = path.join(outDir, texturesDirName);
   const audioDirName = `${base}_audio`;
   const audioDirAbs = path.join(outDir, audioDirName);
+  const lightmapsDirName = `${base}_lightmaps`;
+  const lightmapsDirAbs = path.join(outDir, lightmapsDirName);
   const manifestPath = path.join(outDir, `${base}.resonite.json`);
 
-  const { doc, ctx } = buildGltfDocument(bundle, { untexturedMaterials: true });
+  const { doc, ctx } = buildGltfDocument(bundle, { untexturedMaterials: true, skipHidden: options?.skipHidden });
   const manifest = applyResoniteLayout(doc, bundle, ctx, {
     glbFileName: path.basename(glbPath),
     texturesDirName,
     texturesDirAbs,
     audioDirName,
     audioDirAbs,
+    lightmapsDirName,
+    lightmapsDirAbs,
   });
   // No prune()/dedup here: prune would delete the intentionally empty Texture/Material slots.
 

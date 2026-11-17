@@ -247,6 +247,7 @@ export function parseRawDocsToSourceScene(rawDocs: RawYamlDocument[], sceneName:
           staticBatchInfo,
           staticBatchRoot,
           isStatic: lightmapIndex >= 0 || (staticBatchInfo && staticBatchInfo.subMeshCount > 0) || false,
+          enabled: d['m_Enabled'] === undefined ? true : d['m_Enabled'] === 1 || d['m_Enabled'] === true,
         });
         break;
       }

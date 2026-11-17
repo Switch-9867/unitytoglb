@@ -12,6 +12,7 @@ import { createGltfMesh } from './geometry.js';
 import { createGltfMaterial } from './materials.js';
 import { createTextureManager } from './textures.js';
 import { GuidIndex } from '../io/guidIndex.js';
+import { SourceLightingData } from '../parse/lightingData.js';
 import { Matrix4, createIdentityMatrix, createTRSMatrix, multiplyMatrices, invertMatrix } from './matrix.js';
 
 export interface SourceBundle {
@@ -19,6 +20,8 @@ export interface SourceBundle {
   meshes: Map<string, SourceMesh>; // key: guid
   materials: Map<string, SourceMaterial>; // key: guid
   guidIndex?: GuidIndex;
+  /** Baked lightmap list and per-renderer assignments (from the scene's LightingDataAsset). */
+  lighting?: SourceLightingData;
 }
 
 export interface ConvertOptions {
@@ -29,6 +32,22 @@ export interface ConvertOptions {
   rotateYUp?: boolean;
   /** Embed no textures; keep materials as untextured placeholders (used by the Resonite layout). */
   untexturedMaterials?: boolean;
+  /** Leave out meshes that are invisible in Unity (disabled renderer or inactive GameObject). */
+  skipHidden?: boolean;
+}
+
+/** Unity transform fileIDs whose GameObject is inactive itself or through an inactive ancestor. */
+export function computeInactiveNodes(scene: SourceScene): Set<number> {
+  const inactive = new Set<number>();
+  const walk = (id: number, parentActive: boolean) => {
+    const node = scene.nodes.get(id);
+    if (!node) return;
+    const active = parentActive && node.active;
+    if (!active) inactive.add(id);
+    for (const child of node.childFileIds) walk(child, active);
+  };
+  for (const root of scene.rootNodeFileIds) walk(root, true);
+  return inactive;
 }
 
 export interface RendererMeshInfo {
@@ -100,9 +119,13 @@ export function buildGltfDocument(
   const meshVariantMap = new Map<string, Mesh>();
   const nodeMeshMap = new Map<number, Mesh>();
   const rendererMeshes = new Map<number, RendererMeshInfo>();
+  const inactiveNodes = options?.skipHidden ? computeInactiveNodes(bundle.scene) : null;
 
   for (const renderer of bundle.scene.renderers) {
     if (!renderer.meshGuid || !bundle.meshes.has(renderer.meshGuid)) {
+      continue;
+    }
+    if (inactiveNodes && (renderer.enabled === false || inactiveNodes.has(renderer.nodeFileId))) {
       continue;
     }
 

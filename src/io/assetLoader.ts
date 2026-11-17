@@ -7,6 +7,7 @@ import { parseSourceMesh } from '../parse/mesh.js';
 import { parseSourceMaterial, createBuiltinMaterial } from '../parse/material.js';
 import { createBuiltinPrimitiveMesh } from '../parse/builtinPrimitives.js';
 import { SourceBundle } from '../convert/convert.js';
+import { parseLightingDataAsset, SourceLightingData } from '../parse/lightingData.js';
 
 export interface AssetLoadingReport {
   totalRenderers: number;
@@ -105,11 +106,24 @@ export function loadAssetsForScene(scene: SourceScene, guidIndex: GuidIndex): So
     missingMeshGuids,
   };
 
+  // Baked lighting (lightmap list + per-renderer lightmap index / scale-offset)
+  let lighting: SourceLightingData | undefined;
+  const lightingGuid = scene.settings.lightmapSettings?.lightingDataAssetRef?.guid;
+  const lightingEntry = lightingGuid ? guidIndex.get(lightingGuid) : undefined;
+  if (lightingEntry && fs.existsSync(lightingEntry.assetPath)) {
+    try {
+      lighting = parseLightingDataAsset(fs.readFileSync(lightingEntry.assetPath, 'utf8'));
+    } catch {
+      lighting = undefined;
+    }
+  }
+
   return {
     scene,
     meshes,
     materials,
     guidIndex,
+    lighting,
     report,
   };
 }

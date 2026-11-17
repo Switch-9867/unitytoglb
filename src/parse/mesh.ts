@@ -248,8 +248,8 @@ export function extractChannelFloat32(vd: VertexData, semantic: number): Float32
     targetDimension = 3; // POSITION & NORMAL are always VEC3
   } else if (semantic === 2) {
     targetDimension = 4; // TANGENT is always VEC4
-  } else if (semantic === 4) {
-    targetDimension = 2; // TEXCOORD_0 is always VEC2
+  } else if (semantic >= 4 && semantic <= 11) {
+    targetDimension = 2; // TEXCOORD_n are exported as VEC2
   }
 
   const result = new Float32Array(validVertexCount * targetDimension);
