@@ -61,8 +61,9 @@ export function parseRawDocsToSourceScene(rawDocs: RawYamlDocument[], sceneName:
     if (doc.classId === 1) {
       // GameObject
       gameObjects.set(doc.fileId, doc.data);
-    } else if (doc.classId === 4) {
-      // Transform
+    } else if (doc.classId === 4 || doc.classId === 224) {
+      // Transform / RectTransform (UI objects; RectTransform extends Transform and
+      // serializes the same m_LocalPosition / m_LocalRotation / m_LocalScale / m_Father / m_Children)
       transforms.set(doc.fileId, doc.data);
     }
   }

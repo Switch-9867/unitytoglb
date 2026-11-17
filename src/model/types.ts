@@ -143,7 +143,7 @@ export interface SourceCamera {
 export interface SourceLight {
   fileID: number;
   nodeFileId: number;
-  type: number; // 0=Directional, 1=Point, 2=Spot, 3=Area
+  type: number; // Unity LightType: 0=Spot, 1=Directional, 2=Point, 3=Area
   color: ColorRGBA;
   intensity: number;
   range: number;

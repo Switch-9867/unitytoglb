@@ -37,7 +37,7 @@ describe('Milestone 6: Cameras & Lights', () => {
     const sourceLight: SourceLight = {
       fileID: 200,
       nodeFileId: 1,
-      type: 0, // Directional
+      type: 1, // Unity LightType.Directional
       color: { r: 1.0, g: 0.9, b: 0.8, a: 1.0 },
       intensity: 2.5,
       range: 50,
@@ -54,6 +54,16 @@ describe('Milestone 6: Cameras & Lights', () => {
     expect(ext.getType()).toBe('directional');
     expect(ext.getColor()).toEqual([1.0, 0.9, 0.8]);
     expect(ext.getIntensity()).toBe(2.5);
+
+    // Unity LightType: 0 = Spot, 2 = Point, 3 = Area (skipped: no glTF equivalent)
+    const typeOf = (unityType: number) => {
+      const n = doc.createNode(`L${unityType}`);
+      attachGltfLight(doc, n, { ...sourceLight, type: unityType });
+      return n.getExtension<any>('KHR_lights_punctual')?.getType() ?? null;
+    };
+    expect(typeOf(0)).toBe('spot');
+    expect(typeOf(2)).toBe('point');
+    expect(typeOf(3)).toBeNull();
 
     // Verify binary serialization with extension registered
     const io = new NodeIO().registerExtensions([KHRLightsPunctual]);

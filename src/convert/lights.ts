@@ -10,9 +10,12 @@ import { SourceLight } from '../model/types.js';
 export function attachGltfLight(doc: Document, node: Node, sourceLight: SourceLight): void {
   const khrLightsExt = doc.createExtension(KHRLightsPunctual);
 
-  let type: 'directional' | 'point' | 'spot' = 'directional';
-  if (sourceLight.type === 1) type = 'point';
-  else if (sourceLight.type === 2) type = 'spot';
+  // Unity LightType: 0 = Spot, 1 = Directional, 2 = Point, 3 = Area (no glTF equivalent; area lights are baked-only)
+  let type: 'directional' | 'point' | 'spot';
+  if (sourceLight.type === 0) type = 'spot';
+  else if (sourceLight.type === 1) type = 'directional';
+  else if (sourceLight.type === 2) type = 'point';
+  else return;
 
   const light = khrLightsExt
     .createLight()
